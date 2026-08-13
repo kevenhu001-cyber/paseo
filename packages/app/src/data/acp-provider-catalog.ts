@@ -253,6 +253,16 @@ const CATALOG_DATA = [
     command: ["kiro-cli", "acp"],
   },
   {
+    id: "mcode",
+    title: "MiniMax Code",
+    description:
+      "MiniMax's terminal coding agent with native ACP support. Streams tool calls, slash commands, and chooser-style question permissions through the standard ACP protocol.",
+    version: "manual",
+    iconId: "mcode",
+    installLink: "https://minimaxi.com/",
+    command: ["mcode", "acp"],
+  },
+  {
     id: "kimi",
     title: "Kimi Code CLI",
     description: "Moonshot AI's open-source terminal coding agent",

@@ -3493,7 +3493,15 @@ function mapPermissionRequest(
   params: RequestPermissionRequest,
   snapshot: ACPToolSnapshot,
 ): AgentPermissionRequest {
-  const kind: AgentPermissionRequestKind = snapshot.kind === "switch_mode" ? "mode" : "tool";
+  // A chooser request — multiple options of the same kind — is the ACP universal
+  // mechanism for asking the user a multi-choice question, not approving a tool
+  // call. Without this reclassification the front-end shows it as a generic
+  // tool prompt and the universal "ask user" tool cannot render correctly.
+  const kind: AgentPermissionRequestKind = (() => {
+    if (snapshot.kind === "switch_mode") return "mode";
+    if (isACPChooserRequest(params.options)) return "question";
+    return "tool";
+  })();
   const chooserText = isACPChooserRequest(params.options)
     ? extractToolText(params.toolCall.content)
     : undefined;

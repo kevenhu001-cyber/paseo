@@ -439,7 +439,7 @@ The [Agent Client Protocol (ACP)](https://agentclientprotocol.com) is an open st
 
 ACP agents communicate over JSON-RPC 2.0 on stdio. Paseo spawns the agent process and talks to it through stdin/stdout.
 
-Paseo also ships an in-app ACP provider catalog for common agents, including CodeWhale, Cursor, DeepAgents, DimCode, Gemini CLI, Hermes, Qwen Code, and Kimi Code. Catalog entries create the same `extends: "acp"` provider config shown below.
+Paseo also ships an in-app ACP provider catalog for common agents, including CodeWhale, Cursor, DeepAgents, DimCode, Gemini CLI, Hermes, Qwen Code, Kimi Code, and MiniMax Code. Catalog entries create the same `extends: "acp"` provider config shown below.
 
 ### Adding a generic ACP provider
 
@@ -575,6 +575,30 @@ Ref: [Gemini CLI ACP mode docs](https://github.com/google-gemini/gemini-cli/blob
 ```
 
 Ref: [Hermes ACP docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/acp)
+
+### Example: MiniMax Code (`mcode`)
+
+[MiniMax Code](https://minimaxi.com/) is MiniMax's terminal coding agent with native ACP support. The `mcode` CLI exposes the ACP subcommand and publishes slash commands asynchronously after `session/new`, so Paseo waits for the first batch before exposing the slash-command list.
+
+1. Install the `mcode` CLI and authenticate (the CLI manages its own credentials)
+2. Add to config.json:
+
+```json
+{
+  "agents": {
+    "providers": {
+      "mcode": {
+        "extends": "acp",
+        "label": "MiniMax Code",
+        "description": "MiniMax's terminal coding agent with native ACP support",
+        "command": ["mcode", "acp"]
+      }
+    }
+  }
+}
+```
+
+The `mcode` provider id is treated specially by Paseo: it instantiates `MCodeACPAgentClient` so the initial `available_commands_update` batch is awaited before `listCommands()` resolves (matches the trae-cli / cursor-agent pattern). The same id is also registered in the in-app ACP catalog under `MiniMax Code`.
 
 ### How ACP providers work in Paseo
 
