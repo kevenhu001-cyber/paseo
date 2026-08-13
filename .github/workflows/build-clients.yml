@@ -1,0 +1,148 @@
+name: Build Clients (Android + Desktop)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'build-v*'
+
+# Allow uploading artifacts
+permissions:
+  contents: read
+
+concurrency:
+  group: build-clients-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Android APK (local Gradle build, development variant, debug-signed release)
+  # ---------------------------------------------------------------------------
+  android-apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        # postinstall runs scripts/postinstall-patches.mjs (patch-package) which is required
+        run: npm ci
+
+      - name: Build shared app deps (highlight / client / expo-two-way-audio)
+        run: npm run build:app-deps
+
+      - name: Prebuild Android native project
+        working-directory: packages/app
+        env:
+          APP_VARIANT: development
+        run: npx expo prebuild --platform android --non-interactive
+
+      - name: Configure Gradle (IPv4 + timeouts)
+        shell: bash
+        run: |
+          cat >> packages/app/android/gradle.properties <<'EOF'
+          org.gradle.daemon=false
+          systemProp.java.net.preferIPv4Stack=true
+          systemProp.http.connectionTimeout=120000
+          systemProp.http.socketTimeout=120000
+          systemProp.https.connectionTimeout=120000
+          systemProp.https.socketTimeout=120000
+          EOF
+
+      - name: Assemble release APK
+        working-directory: packages/app/android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: packages/app/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Desktop (Electron) for Windows
+  # ---------------------------------------------------------------------------
+  desktop-windows:
+    name: Desktop (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build server + web UI deps
+        run: npm run build:server:clean
+
+      - name: Build desktop main process
+        run: npm run build:main --workspace=@getpaseo/desktop
+
+      - name: Package Windows installer (no publish)
+        working-directory: packages/desktop
+        shell: bash
+        run: npx electron-builder --config electron-builder.yml --publish never --win
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: packages/desktop/release/*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Desktop (Electron) for Linux
+  # ---------------------------------------------------------------------------
+  desktop-linux:
+    name: Desktop (Linux)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system deps for Electron (fpm/libx11 etc.)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxshmfence1 libasound2 libgtk-3-0 libnss3 libxss1 \
+            libgbm1 libx11-xcb1 fakeroot dpkg rpm
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build server + web UI deps
+        run: npm run build:server:clean
+
+      - name: Build desktop main process
+        run: npm run build:main --workspace=@getpaseo/desktop
+
+      - name: Package Linux artifacts (no publish)
+        working-directory: packages/desktop
+        run: npx electron-builder --config electron-builder.yml --publish never --linux
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: packages/desktop/release/*
+          if-no-files-found: error
