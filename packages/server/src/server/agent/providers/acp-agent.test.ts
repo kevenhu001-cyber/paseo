@@ -1153,6 +1153,7 @@ describe("ACPAgentSession Zed parity", () => {
     expect(requested).toMatchObject({
       type: "permission_requested",
       request: {
+        kind: "tool",
         actions: [
           { id: "allow-once", label: "Allow", behavior: "allow" },
           { id: "reject-once", label: "Reject", behavior: "deny" },
@@ -1208,10 +1209,23 @@ describe("ACPAgentSession Zed parity", () => {
     expect(requested).toMatchObject({
       type: "permission_requested",
       request: {
+        kind: "question",
         detail: {
           type: "plain_text",
           label: "AskUserQuestion",
           text: "Which path should Paseo take?",
+        },
+        input: {
+          questions: [
+            {
+              question: "Which path should Paseo take?",
+              header: "Response",
+              options: [{ label: "Narrow fix" }, { label: "Protocol fix" }],
+              multiSelect: false,
+              allowOther: false,
+              allowEmpty: false,
+            },
+          ],
         },
         actions: [
           { id: "q0_opt_0", label: "Narrow fix", behavior: "allow" },
@@ -1224,9 +1238,23 @@ describe("ACPAgentSession Zed parity", () => {
       throw new Error("Expected permission request");
     }
 
+    await expect(
+      session.respondToPermission(requested.request.id, {
+        behavior: "allow",
+        updatedInput: {
+          ...requested.request.input,
+          answers: { Response: "Unknown option" },
+        },
+      }),
+    ).rejects.toThrow("did not select an available option");
+    expect(session.getPendingPermissions()).toHaveLength(1);
+
     await session.respondToPermission(requested.request.id, {
       behavior: "allow",
-      selectedActionId: "q0_opt_1",
+      updatedInput: {
+        ...requested.request.input,
+        answers: { Response: "Protocol fix" },
+      },
     });
 
     await expect(permission).resolves.toEqual({

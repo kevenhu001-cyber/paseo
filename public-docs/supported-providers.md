@@ -48,6 +48,7 @@ Pick any of these from the in-app provider catalog. Each entry is a one-click in
 - [Junie](https://junie.jetbrains.com/docs/junie-cli-acp.html), JetBrains' coding agent.
 - [Kilo Code](https://kilo.ai/docs/code-with-ai/platforms/cli), open-source coding agent.
 - [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code), Moonshot AI's coding assistant.
+- [MiniMax Code](https://agent.minimaxi.com/download), MiniMax's coding agent.
 - [Minion Code](https://github.com/femto/minion-code), Minion-framework coding agent.
 - [Mistral Vibe](https://github.com/mistralai/mistral-vibe), Mistral's open-source CLI assistant.
 - [Nova](https://www.compassap.ai/portfolio/nova.html), Compass AI's software engineer.

@@ -26,6 +26,8 @@ const mockState = vi.hoisted(() => {
     runtimeSettings?: unknown;
     providerParams?: unknown;
     commandsRpcType?: unknown;
+    waitForInitialCommands?: boolean;
+    initialCommandsWaitTimeoutMs?: number;
   }
 
   return {
@@ -55,6 +57,8 @@ const mockState = vi.hoisted(() => {
         providerId?: string;
         label?: string;
         providerParams?: unknown;
+        waitForInitialCommands?: boolean;
+        initialCommandsWaitTimeoutMs?: number;
       }>,
     },
     isCommandAvailable: vi.fn(async (_command: string) => false),
@@ -305,6 +309,8 @@ vi.mock("./providers/generic-acp-agent.js", () => ({
       providerId?: string;
       label?: string;
       providerParams?: unknown;
+      waitForInitialCommands?: boolean;
+      initialCommandsWaitTimeoutMs?: number;
     }) {
       const providerParams =
         options.providerParams &&
@@ -326,13 +332,20 @@ vi.mock("./providers/generic-acp-agent.js", () => ({
         },
         env: options.env,
       };
-      mockState.constructorArgs.genericAcp.push({
+      const constructorEntry = {
         command: options.command,
         env: options.env,
         providerId: options.providerId,
         label: options.label,
         providerParams: options.providerParams,
-      });
+        ...(options.waitForInitialCommands !== undefined
+          ? { waitForInitialCommands: options.waitForInitialCommands }
+          : {}),
+        ...(options.initialCommandsWaitTimeoutMs !== undefined
+          ? { initialCommandsWaitTimeoutMs: options.initialCommandsWaitTimeoutMs }
+          : {}),
+      };
+      mockState.constructorArgs.genericAcp.push(constructorEntry);
     }
 
     async createSession(): Promise<never> {
@@ -946,6 +959,40 @@ test("kimi provider extending acp uses KimiACPAgentClient", () => {
     },
   ]);
   expect(mockState.constructorArgs.genericAcp).toEqual([]);
+});
+
+test("mcode provider extending acp waits for its initial command update", () => {
+  const registry = buildProviderRegistry(logger, {
+    providerOverrides: {
+      mcode: {
+        extends: "acp",
+        label: "MiniMax Code",
+        command: ["mcode", "acp"],
+      },
+    },
+  });
+
+  expect(registry.mcode.createClient(logger).provider).toBe("mcode");
+  expect(mockState.constructorArgs.genericAcp).toEqual([
+    {
+      command: ["mcode", "acp"],
+      env: undefined,
+      providerId: "mcode",
+      label: "MiniMax Code",
+      providerParams: undefined,
+      waitForInitialCommands: true,
+      initialCommandsWaitTimeoutMs: 10_000,
+    },
+    {
+      command: ["mcode", "acp"],
+      env: undefined,
+      providerId: "mcode",
+      label: "MiniMax Code",
+      providerParams: undefined,
+      waitForInitialCommands: true,
+      initialCommandsWaitTimeoutMs: 10_000,
+    },
+  ]);
 });
 
 test('extends: "acp" without command throws', () => {

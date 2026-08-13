@@ -2119,11 +2119,14 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       throw new Error(`No pending permission request with id '${requestId}'`);
     }
 
-    const selectedOption = selectPermissionOption(pending.options, response);
+    const selectedOption = selectPermissionOption(pending.options, response, pending.request);
     if (response.selectedActionId !== undefined && !selectedOption) {
       throw new Error(
         `ACP permission action '${response.selectedActionId}' does not exist or does not match '${response.behavior}' behavior`,
       );
+    }
+    if (pending.request.kind === "question" && response.behavior === "allow" && !selectedOption) {
+      throw new Error("ACP question response did not select an available option");
     }
 
     this.pendingPermissions.delete(requestId);
@@ -3514,10 +3517,14 @@ function mapPermissionRequest(
   params: RequestPermissionRequest,
   snapshot: ACPToolSnapshot,
 ): AgentPermissionRequest {
-  const kind: AgentPermissionRequestKind = snapshot.kind === "switch_mode" ? "mode" : "tool";
-  const chooserText = isACPChooserRequest(params.options)
-    ? extractToolText(params.toolCall.content)
-    : undefined;
+  const isChooser = isACPChooserRequest(params.options);
+  let kind: AgentPermissionRequestKind = "tool";
+  if (snapshot.kind === "switch_mode") {
+    kind = "mode";
+  } else if (isChooser) {
+    kind = "question";
+  }
+  const chooserText = isChooser ? extractToolText(params.toolCall.content) : undefined;
   return {
     id: requestId,
     provider,
@@ -3532,6 +3539,7 @@ function mapPermissionRequest(
           icon: "wrench",
         }
       : mapToolDetail(snapshot, new Map()),
+    input: isChooser ? buildACPQuestionInput(params, snapshot, chooserText) : undefined,
     actions: params.options.map((option) => ({
       id: option.optionId,
       label: option.name,
@@ -3548,12 +3556,29 @@ function mapPermissionRequest(
 function selectPermissionOption(
   options: PermissionOption[],
   response: AgentPermissionResponse,
+  request?: AgentPermissionRequest,
 ): PermissionOption | null {
   if (response.selectedActionId !== undefined) {
     const selectedOption = options.find((option) => option.optionId === response.selectedActionId);
     if (!selectedOption) return null;
     const selectedBehavior = selectedOption.kind.startsWith("allow") ? "allow" : "deny";
     return selectedBehavior === response.behavior ? selectedOption : null;
+  }
+
+  if (request?.kind === "question" && response.behavior === "allow") {
+    const answers = extractQuestionAnswerLabels(response.updatedInput);
+    if (answers.length === 0) {
+      return null;
+    }
+    return (
+      options.find(
+        (option) =>
+          option.kind.startsWith("allow") &&
+          answers.some(
+            (answer) => normalizeQuestionAnswer(answer) === normalizeQuestionAnswer(option.name),
+          ),
+      ) ?? null
+    );
   }
 
   const order =
@@ -3581,6 +3606,55 @@ function isACPChooserRequest(options: PermissionOption[]): boolean {
     allowKinds.add(option.kind);
   }
   return false;
+}
+
+function buildACPQuestionInput(
+  params: RequestPermissionRequest,
+  snapshot: ACPToolSnapshot,
+  questionText: string | undefined,
+): AgentMetadata {
+  return {
+    questions: [
+      {
+        question: questionText ?? params.toolCall.title ?? snapshot.title,
+        header: "Response",
+        options: params.options
+          .filter((option) => option.kind.startsWith("allow"))
+          .map((option) => ({ label: option.name })),
+        multiSelect: false,
+        allowOther: false,
+        allowEmpty: false,
+      },
+    ],
+  };
+}
+
+function extractQuestionAnswerLabels(input: AgentMetadata | undefined): string[] {
+  if (!input || !isRecord(input.answers)) {
+    return [];
+  }
+
+  const labels: string[] = [];
+  for (const value of Object.values(input.answers)) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed) {
+      labels.push(trimmed);
+      labels.push(
+        ...trimmed
+          .split(",")
+          .map((label) => label.trim())
+          .filter(Boolean),
+      );
+    }
+  }
+  return labels;
+}
+
+function normalizeQuestionAnswer(value: string): string {
+  return value.trim().toLocaleLowerCase();
 }
 
 function appendTerminalOutput(entry: TerminalEntry, chunk: string): void {

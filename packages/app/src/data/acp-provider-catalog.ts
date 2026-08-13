@@ -262,6 +262,15 @@ const CATALOG_DATA = [
     command: ["kimi", "acp"],
   },
   {
+    id: "mcode",
+    title: "MiniMax Code",
+    description: "MiniMax's terminal coding agent with native ACP support",
+    version: "manual",
+    iconId: "mcode",
+    installLink: "https://agent.minimaxi.com/download",
+    command: ["mcode", "acp"],
+  },
+  {
     id: "minion-code",
     title: "Minion Code",
     description:
