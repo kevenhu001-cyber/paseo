@@ -54,6 +54,24 @@ describe("question form card core", () => {
     });
   });
 
+  test("allows optional option-only questions to submit without a selection", () => {
+    const questions = parseQuestionFormQuestions({
+      questions: [
+        {
+          question: "Optional choice",
+          header: "Choice",
+          options: [{ label: "A" }, { label: "B" }],
+          multiSelect: false,
+          allowEmpty: true,
+        },
+      ],
+    });
+
+    if (!questions) throw new Error("questions did not parse");
+    expect(areQuestionsAnswered(questions, {}, {})).toBe(true);
+    expect(buildQuestionFormAnswers(questions, {}, {})).toEqual({});
+  });
+
   test("shows text input for explicit other questions", () => {
     const questions = parseQuestionFormQuestions({
       questions: [

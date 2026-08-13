@@ -78,7 +78,7 @@ export function isQuestionAnswered(
   }
 
   if (!questionShowsTextInput(question)) {
-    return false;
+    return question.allowEmpty;
   }
 
   const otherText = otherTexts[qIndex]?.trim();

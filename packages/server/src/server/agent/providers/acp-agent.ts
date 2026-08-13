@@ -23,6 +23,10 @@ import {
   type ContentBlock,
   type CreateTerminalRequest,
   type CurrentModeUpdate,
+  type ElicitationContentValue,
+  type ElicitationPropertySchema,
+  type ElicitationRequest,
+  type ElicitationResponse,
   type EnvVariable,
   type InitializeResponse,
   type KillTerminalRequest,
@@ -244,6 +248,9 @@ export const DEFAULT_ACP_CAPABILITIES: AgentCapabilityFlags = {
 };
 
 const BASE_ACP_CLIENT_CAPABILITIES: ACPClientCapabilities = {
+  elicitation: {
+    form: {},
+  },
   fs: {
     readTextFile: false,
     writeTextFile: false,
@@ -390,6 +397,8 @@ export interface ACPCatalogModelResolverContext {
   sessionId: string;
   models: AgentModelDefinition[];
   configOptions: SessionConfigOption[] | null | undefined;
+  sessionUpdates: SessionNotification[];
+  prompt: (prompt: AgentPromptInput) => Promise<PromptResponse>;
   runRequest: <T>(request: () => Promise<T>) => Promise<T>;
   transformConfigOptions: (configOptions: SessionConfigOption[]) => SessionConfigOption[];
   logger: Logger;
@@ -421,6 +430,9 @@ interface ACPAgentClientOptions {
   clientCapabilityMeta?: ACPClientCapabilityMeta;
   modeIdTransformer?: (modeId: string) => string | null;
   toolSnapshotTransformer?: (snapshot: ACPToolSnapshot) => ACPToolSnapshot;
+  providerModelWriter?: (
+    context: ACPProviderModelWriterContext,
+  ) => Promise<ACPProviderModelWriteResult>;
   providerModeWriter?: (
     context: ACPProviderModeWriterContext,
   ) => Promise<ACPProviderModeWriteResult>;
@@ -451,6 +463,9 @@ interface ACPAgentSessionOptions {
   clientCapabilityMeta?: ACPClientCapabilityMeta;
   modeIdTransformer?: (modeId: string) => string | null;
   toolSnapshotTransformer?: (snapshot: ACPToolSnapshot) => ACPToolSnapshot;
+  providerModelWriter?: (
+    context: ACPProviderModelWriterContext,
+  ) => Promise<ACPProviderModelWriteResult>;
   providerModeWriter?: (
     context: ACPProviderModeWriterContext,
   ) => Promise<ACPProviderModeWriteResult>;
@@ -505,6 +520,13 @@ interface PendingPermission {
   options: PermissionOption[];
   resolve: (response: RequestPermissionResponse) => void;
   reject: (error: Error) => void;
+  turnId: string | null;
+}
+
+interface PendingElicitation {
+  request: AgentPermissionRequest;
+  fields: ElicitationField[];
+  resolve: (response: ElicitationResponse) => void;
   turnId: string | null;
 }
 
@@ -582,6 +604,22 @@ export interface ACPProviderModeWriterContext {
   selection: ACPModeSelection;
   configOptions: SessionConfigOption[];
   logger: Logger;
+}
+
+export interface ACPProviderModelWriterContext {
+  connection: ClientSideConnection;
+  sessionId: string;
+  requestedModelId: string;
+  currentModelId: string | null;
+  selection: ACPModelSelection;
+  configOptions: SessionConfigOption[];
+  logger: Logger;
+}
+
+export interface ACPProviderModelWriteResult {
+  handled: boolean;
+  currentModelId?: string;
+  configOptions?: SessionConfigOption[];
 }
 
 export interface ACPProviderModeWriteResult {
@@ -808,6 +846,9 @@ export class ACPAgentClient implements AgentClient {
   private readonly clientCapabilityMeta?: ACPClientCapabilityMeta;
   private readonly modeIdTransformer?: (modeId: string) => string | null;
   private readonly toolSnapshotTransformer?: (snapshot: ACPToolSnapshot) => ACPToolSnapshot;
+  private readonly providerModelWriter?: (
+    context: ACPProviderModelWriterContext,
+  ) => Promise<ACPProviderModelWriteResult>;
   private readonly providerModeWriter?: (
     context: ACPProviderModeWriterContext,
   ) => Promise<ACPProviderModeWriteResult>;
@@ -844,6 +885,7 @@ export class ACPAgentClient implements AgentClient {
     this.clientCapabilityMeta = options.clientCapabilityMeta;
     this.modeIdTransformer = options.modeIdTransformer;
     this.toolSnapshotTransformer = options.toolSnapshotTransformer;
+    this.providerModelWriter = options.providerModelWriter;
     this.providerModeWriter = options.providerModeWriter;
     this.beforeModeWriter = options.beforeModeWriter;
     this.thinkingOptionWriter = options.thinkingOptionWriter;
@@ -873,6 +915,7 @@ export class ACPAgentClient implements AgentClient {
         clientCapabilityMeta: this.clientCapabilityMeta,
         modeIdTransformer: this.modeIdTransformer,
         toolSnapshotTransformer: this.toolSnapshotTransformer,
+        providerModelWriter: this.providerModelWriter,
         providerModeWriter: this.providerModeWriter,
         beforeModeWriter: this.beforeModeWriter,
         thinkingOptionWriter: this.thinkingOptionWriter,
@@ -923,6 +966,7 @@ export class ACPAgentClient implements AgentClient {
       clientCapabilityMeta: this.clientCapabilityMeta,
       modeIdTransformer: this.modeIdTransformer,
       toolSnapshotTransformer: this.toolSnapshotTransformer,
+      providerModelWriter: this.providerModelWriter,
       providerModeWriter: this.providerModeWriter,
       beforeModeWriter: this.beforeModeWriter,
       thinkingOptionWriter: this.thinkingOptionWriter,
@@ -943,6 +987,7 @@ export class ACPAgentClient implements AgentClient {
     context?: ProviderRefreshContext,
   ): Promise<ProviderCatalog> {
     const cwd = options.scope === "global" ? homedir() : options.cwd;
+    const sessionUpdates: SessionNotification[] = [];
     let probe: UninitializedACPProcess | null = null;
     let closePromise: Promise<void> | null = null;
     const closeProbe = (): Promise<void> => {
@@ -958,6 +1003,7 @@ export class ACPAgentClient implements AgentClient {
         raceProviderRefreshAbort(
           context?.signal,
           this.spawnProcess(PROBE_ENV, {
+            onSessionUpdate: (update) => sessionUpdates.push(update),
             onSpawned: (spawned) => {
               probe = spawned;
               if (context?.signal.aborted) void closeProbe().catch(() => undefined);
@@ -992,6 +1038,14 @@ export class ACPAgentClient implements AgentClient {
                 sessionId: response.sessionId,
                 models: derivedModels,
                 configOptions: transformed.configOptions,
+                sessionUpdates,
+                prompt: (prompt) =>
+                  this.runACPRequest(() =>
+                    initializedProbe.connection.prompt({
+                      sessionId: response.sessionId,
+                      prompt: toACPContentBlocks(prompt),
+                    }),
+                  ),
                 runRequest: (request) => this.runACPRequest(request),
                 transformConfigOptions: (configOptions) =>
                   this.configOptionsTransformer
@@ -1107,10 +1161,11 @@ export class ACPAgentClient implements AgentClient {
     launchEnv?: Record<string, string>,
     options?: {
       initializeTimeoutMs?: number;
+      onSessionUpdate?: (update: SessionNotification) => void;
       onSpawned?: (probe: UninitializedACPProcess) => void;
     },
   ): Promise<SpawnedACPProcess> {
-    const transport = await this.spawnTransport(launchEnv);
+    const transport = await this.spawnTransport(launchEnv, options?.onSessionUpdate);
     const probe: UninitializedACPProcess = {
       child: transport.child,
       connection: transport.connection,
@@ -1131,7 +1186,10 @@ export class ACPAgentClient implements AgentClient {
     }
   }
 
-  protected async spawnTransport(launchEnv?: Record<string, string>): Promise<ACPProcessTransport> {
+  protected async spawnTransport(
+    launchEnv?: Record<string, string>,
+    onSessionUpdate?: (update: SessionNotification) => void,
+  ): Promise<ACPProcessTransport> {
     const { command, args } = await this.resolveLaunchCommand();
     const child = spawnProcess(command, args, {
       cwd: process.cwd(),
@@ -1165,7 +1223,10 @@ export class ACPAgentClient implements AgentClient {
       Readable.toWeb(child.stdout),
       { logger: this.logger, provider: this.provider },
     );
-    const connection = new ClientSideConnection(() => this.buildProbeClient(), stream);
+    const connection = new ClientSideConnection(
+      () => this.buildProbeClient({ onSessionUpdate }),
+      stream,
+    );
 
     return {
       child,
@@ -1211,12 +1272,26 @@ export class ACPAgentClient implements AgentClient {
     }
   }
 
-  protected buildProbeClient(): ACPClient {
+  protected buildProbeClient(options?: {
+    onSessionUpdate?: (update: SessionNotification) => void;
+  }): ACPClient {
     return {
       async requestPermission(): Promise<RequestPermissionResponse> {
         return { outcome: { outcome: "cancelled" } };
       },
-      async sessionUpdate(): Promise<void> {},
+      async sessionUpdate(params: SessionNotification): Promise<void> {
+        options?.onSessionUpdate?.(params);
+      },
+      async extMethod(
+        method: string,
+        _params: Record<string, unknown>,
+      ): Promise<Record<string, unknown>> {
+        if (method === "session/elicitation" || method === "elicitation/create") {
+          return { action: { action: "cancel" } };
+        }
+        throw new Error(`ACP model probe does not support extension method '${method}'`);
+      },
+      async extNotification(): Promise<void> {},
       async readTextFile(params: ReadTextFileRequest) {
         const content = await fs.readFile(params.path, "utf8");
         return { content };
@@ -1413,6 +1488,9 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private readonly clientCapabilityMeta?: ACPClientCapabilityMeta;
   private readonly modeIdTransformer?: (modeId: string) => string | null;
   private readonly toolSnapshotTransformer?: (snapshot: ACPToolSnapshot) => ACPToolSnapshot;
+  private readonly providerModelWriter?: (
+    context: ACPProviderModelWriterContext,
+  ) => Promise<ACPProviderModelWriteResult>;
   private readonly providerModeWriter?: (
     context: ACPProviderModeWriterContext,
   ) => Promise<ACPProviderModeWriteResult>;
@@ -1428,6 +1506,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   private readonly launchEnv?: Record<string, string>;
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
   private readonly pendingPermissions = new Map<string, PendingPermission>();
+  private readonly pendingElicitations = new Map<string, PendingElicitation>();
   private pendingUserMessage: PendingUserMessage | null = null;
   private submittedUserMessageTurnId: string | null = null;
   private readonly toolCalls = new Map<string, ACPToolSnapshot>();
@@ -1479,6 +1558,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.clientCapabilityMeta = options.clientCapabilityMeta;
     this.modeIdTransformer = options.modeIdTransformer;
     this.toolSnapshotTransformer = options.toolSnapshotTransformer;
+    this.providerModelWriter = options.providerModelWriter;
     this.providerModeWriter = options.providerModeWriter;
     this.beforeModeWriter = options.beforeModeWriter;
     this.thinkingOptionWriter = options.thinkingOptionWriter;
@@ -1928,7 +2008,33 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         );
         return;
       }
+    }
 
+    const providerResult = this.providerModelWriter
+      ? await this.providerModelWriter({
+          connection: this.connection,
+          sessionId: this.sessionId,
+          requestedModelId: modelId,
+          currentModelId: this.currentModel,
+          selection,
+          configOptions: this.configOptions,
+          logger: this.logger,
+        })
+      : { handled: false };
+    if (providerResult.handled) {
+      this.currentModel = providerResult.currentModelId ?? modelId;
+      if (providerResult.configOptions) {
+        this.configOptions = this.transformConfigOptions(providerResult.configOptions);
+      }
+      this.pushEvent({
+        type: "model_changed",
+        provider: this.provider,
+        runtimeInfo: this.runtimeInfo(),
+      });
+      return;
+    }
+
+    if (selection.hasAvailableModels) {
       if (typeof this.connection.unstable_setSessionModel !== "function") {
         throw new Error(this.modelSelectionUnavailableMessage());
       }
@@ -2110,13 +2216,34 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   }
 
   getPendingPermissions(): AgentPermissionRequest[] {
-    return Array.from(this.pendingPermissions.values(), (entry) => entry.request);
+    return [
+      ...Array.from(this.pendingPermissions.values(), (entry) => entry.request),
+      ...Array.from(this.pendingElicitations.values(), (entry) => entry.request),
+    ];
   }
 
   async respondToPermission(requestId: string, response: AgentPermissionResponse): Promise<void> {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) {
-      throw new Error(`No pending permission request with id '${requestId}'`);
+      const elicitation = this.pendingElicitations.get(requestId);
+      if (!elicitation) {
+        throw new Error(`No pending permission request with id '${requestId}'`);
+      }
+
+      const elicitationResponse = mapElicitationResponse(elicitation, response);
+      this.pendingElicitations.delete(requestId);
+      elicitation.resolve(elicitationResponse);
+      this.pushEvent({
+        type: "permission_resolved",
+        provider: this.provider,
+        requestId,
+        resolution: response,
+        turnId: elicitation.turnId ?? undefined,
+      });
+      if (response.behavior === "deny" && response.interrupt && this.activeForegroundTurnId) {
+        await this.connection?.cancel({ sessionId: this.sessionId! });
+      }
+      return;
     }
 
     const selectedOption = selectPermissionOption(pending.options, response, pending.request);
@@ -2178,6 +2305,10 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       pending.resolve({ outcome: { outcome: "cancelled" } });
     }
     this.pendingPermissions.clear();
+    for (const pending of this.pendingElicitations.values()) {
+      pending.resolve({ action: { action: "cancel" } });
+    }
+    this.pendingElicitations.clear();
 
     if (this.activeForegroundTurnId) {
       await this.connection.cancel({ sessionId: this.sessionId });
@@ -2197,6 +2328,10 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       pending.resolve({ outcome: { outcome: "cancelled" } });
     }
     this.pendingPermissions.clear();
+    for (const pending of this.pendingElicitations.values()) {
+      pending.resolve({ action: { action: "cancel" } });
+    }
+    this.pendingElicitations.clear();
 
     if (this.connection && this.sessionId) {
       try {
@@ -2235,7 +2370,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     const canAutoAccept =
-      isACPAutoAcceptEnabled(this.config) && !isACPChooserRequest(params.options);
+      isACPAutoAcceptEnabled(this.config) && !isACPChooserRequest(params.options, params.toolCall);
     if (canAutoAccept) {
       const allowOption = selectPermissionOption(params.options, { behavior: "allow" });
       if (allowOption) {
@@ -2273,6 +2408,52 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       type: "permission_requested",
       provider: this.provider,
       request,
+      turnId: this.activeForegroundTurnId ?? undefined,
+    });
+    return promise;
+  }
+
+  async extMethod(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (method === "session/elicitation" || method === "elicitation/create") {
+      return this.requestElicitation(params as unknown as ElicitationRequest);
+    }
+    throw new Error(`Unsupported ACP client extension method '${method}'`);
+  }
+
+  private async requestElicitation(params: ElicitationRequest): Promise<ElicitationResponse> {
+    const mode = params.mode ?? "form";
+    if (mode !== "form") {
+      this.logger.warn(
+        { mode },
+        `${this.provider} ACP URL elicitation is not supported; cancelling request`,
+      );
+      return { action: { action: "cancel" } };
+    }
+
+    // A few ACP/MCP bridges omit `mode` for the default form request. Normalize
+    // that wire-compatible shape before handing it to the typed mapper.
+    const formParams = { ...params, mode: "form" } as Extract<ElicitationRequest, { mode: "form" }>;
+    const mapped = mapElicitationRequest(this.provider, randomUUID(), formParams);
+    if (mapped.fields.length === 0) {
+      return { action: { action: "accept", content: {} } };
+    }
+
+    const promise = new Promise<ElicitationResponse>((resolve) => {
+      this.pendingElicitations.set(mapped.request.id, {
+        request: mapped.request,
+        fields: mapped.fields,
+        resolve,
+        turnId: this.activeForegroundTurnId,
+      });
+    });
+
+    this.pushEvent({
+      type: "permission_requested",
+      provider: this.provider,
+      request: mapped.request,
       turnId: this.activeForegroundTurnId ?? undefined,
     });
     return promise;
@@ -2591,7 +2772,10 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       await this.setModeWithSelection({ modeId: configuredModeId, selection });
     }
     const configuredModelId = this.config.model;
-    if (configuredModelId && configuredModelId !== this.currentModel) {
+    if (
+      configuredModelId &&
+      (configuredModelId !== this.currentModel || this.providerModelWriter !== undefined)
+    ) {
       const selection = resolveACPModelSelection({
         modelId: configuredModelId,
         availableModels: this.availableModels,
@@ -3517,7 +3701,7 @@ function mapPermissionRequest(
   params: RequestPermissionRequest,
   snapshot: ACPToolSnapshot,
 ): AgentPermissionRequest {
-  const isChooser = isACPChooserRequest(params.options);
+  const isChooser = isACPChooserRequest(params.options, params.toolCall);
   let kind: AgentPermissionRequestKind = "tool";
   if (snapshot.kind === "switch_mode") {
     kind = "mode";
@@ -3594,7 +3778,15 @@ function selectPermissionOption(
   return null;
 }
 
-function isACPChooserRequest(options: PermissionOption[]): boolean {
+function isACPChooserRequest(
+  options: PermissionOption[],
+  toolCall?: { title?: string | null },
+): boolean {
+  const toolName = toolCall?.title?.trim().toLocaleLowerCase() ?? "";
+  if (/(?:ask[_ -]?user|question|elicitation)/u.test(toolName)) {
+    return true;
+  }
+
   const allowKinds = new Set<PermissionOption["kind"]>();
   for (const option of options) {
     if (!option.kind.startsWith("allow")) {
@@ -3606,6 +3798,207 @@ function isACPChooserRequest(options: PermissionOption[]): boolean {
     allowKinds.add(option.kind);
   }
   return false;
+}
+
+interface ElicitationQuestionOption {
+  label: string;
+  value: ElicitationContentValue;
+}
+
+interface ElicitationField {
+  key: string;
+  schema: ElicitationPropertySchema;
+  options: ElicitationQuestionOption[];
+  required: boolean;
+}
+
+function mapElicitationRequest(
+  provider: string,
+  requestId: string,
+  params: Extract<ElicitationRequest, { mode: "form" }>,
+): { request: AgentPermissionRequest; fields: ElicitationField[] } {
+  const schema = params.requestedSchema;
+  const required = new Set(schema.required ?? []);
+  const fields: ElicitationField[] = [];
+  const questions: AgentMetadata[] = [];
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+
+  for (const [key, rawProperty] of Object.entries(properties)) {
+    if (!isElicitationPropertySchema(rawProperty)) {
+      continue;
+    }
+    const field: ElicitationField = {
+      key,
+      schema: rawProperty,
+      options: getElicitationQuestionOptions(rawProperty),
+      required: required.has(key) || isElicitationFieldRequired(rawProperty),
+    };
+    fields.push(field);
+    questions.push({
+      question: rawProperty.description ?? rawProperty.title ?? key,
+      header: key,
+      options: field.options.map((option) => ({
+        label: option.label,
+      })),
+      multiSelect: rawProperty.type === "array",
+      allowOther: field.options.length === 0,
+      allowEmpty: !field.required,
+      ...(rawProperty.default !== undefined && rawProperty.default !== null
+        ? { placeholder: String(rawProperty.default) }
+        : {}),
+    });
+  }
+
+  return {
+    fields,
+    request: {
+      id: requestId,
+      provider,
+      name: "ACP Elicitation",
+      kind: "question",
+      title: params.message,
+      description: schema.description ?? undefined,
+      input: { questions },
+      detail: {
+        type: "plain_text",
+        label: params.message,
+        text: params.message,
+        icon: "wrench",
+      },
+      metadata: {
+        source: "acp_elicitation",
+        rawRequest: params,
+      },
+    },
+  };
+}
+
+function isElicitationPropertySchema(value: unknown): value is ElicitationPropertySchema {
+  return (
+    isRecord(value) &&
+    (value.type === "string" ||
+      value.type === "number" ||
+      value.type === "integer" ||
+      value.type === "boolean" ||
+      value.type === "array")
+  );
+}
+
+function isElicitationFieldRequired(schema: ElicitationPropertySchema): boolean {
+  if (schema.type === "string") {
+    return (schema.minLength ?? 0) > 0;
+  }
+  if (schema.type === "array") {
+    return (schema.minItems ?? 0) > 0;
+  }
+  return false;
+}
+
+function getElicitationQuestionOptions(
+  schema: ElicitationPropertySchema,
+): ElicitationQuestionOption[] {
+  if (schema.type === "boolean") {
+    return [
+      { label: "Yes", value: true },
+      { label: "No", value: false },
+    ];
+  }
+  if (schema.type === "string") {
+    if (schema.oneOf?.length) {
+      return schema.oneOf.map((option) => ({ label: option.title, value: option.const }));
+    }
+    return (schema.enum ?? []).map((value) => ({ label: value, value }));
+  }
+  if (schema.type === "array") {
+    if ("anyOf" in schema.items) {
+      return schema.items.anyOf.map((option) => ({ label: option.title, value: option.const }));
+    }
+    if ("enum" in schema.items) {
+      return schema.items.enum.map((value) => ({ label: value, value }));
+    }
+  }
+  return [];
+}
+
+function mapElicitationResponse(
+  pending: PendingElicitation,
+  response: AgentPermissionResponse,
+): ElicitationResponse {
+  if (response.behavior === "deny") {
+    return { action: { action: response.interrupt ? "cancel" : "decline" } };
+  }
+
+  const answers = isRecord(response.updatedInput?.answers) ? response.updatedInput.answers : {};
+  const content: Record<string, ElicitationContentValue> = {};
+  for (const field of pending.fields) {
+    const rawAnswer = answers[field.key];
+    const isMissing = typeof rawAnswer !== "string" || rawAnswer.trim().length === 0;
+    if (isMissing) {
+      if (field.required) {
+        throw new Error(`ACP elicitation answer is required for '${field.key}'`);
+      }
+      continue;
+    }
+    content[field.key] = parseElicitationAnswer(field, rawAnswer);
+  }
+
+  return { action: { action: "accept", content } };
+}
+
+function parseElicitationAnswer(
+  field: ElicitationField,
+  rawAnswer: string,
+): ElicitationContentValue {
+  const answer = rawAnswer.trim();
+  if (field.schema.type === "array") {
+    const values = answer
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .map((value) => resolveElicitationOption(field.options, value));
+    if (values.length === 0) {
+      throw new Error(`ACP elicitation answer is required for '${field.key}'`);
+    }
+    return values as string[];
+  }
+  if (field.schema.type === "boolean") {
+    const option = resolveElicitationOption(field.options, answer);
+    if (typeof option !== "boolean") {
+      throw new Error(`ACP elicitation answer for '${field.key}' must be true or false`);
+    }
+    return option;
+  }
+  if (field.schema.type === "number" || field.schema.type === "integer") {
+    const value = Number(answer);
+    if (!Number.isFinite(value) || (field.schema.type === "integer" && !Number.isInteger(value))) {
+      throw new Error(`ACP elicitation answer for '${field.key}' must be a number`);
+    }
+    return value;
+  }
+  if (field.options.length > 0) {
+    const value = resolveElicitationOption(field.options, answer);
+    if (typeof value !== "string") {
+      throw new Error(`ACP elicitation answer for '${field.key}' is invalid`);
+    }
+    return value;
+  }
+  return answer;
+}
+
+function resolveElicitationOption(
+  options: ElicitationQuestionOption[],
+  answer: string,
+): ElicitationContentValue {
+  const normalized = normalizeQuestionAnswer(answer);
+  const option = options.find(
+    (candidate) =>
+      normalizeQuestionAnswer(candidate.label) === normalized ||
+      String(candidate.value).trim().toLocaleLowerCase() === normalized,
+  );
+  if (!option) {
+    throw new Error(`ACP elicitation answer '${answer}' is not one of the available options`);
+  }
+  return option.value;
 }
 
 function buildACPQuestionInput(

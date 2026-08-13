@@ -54,6 +54,7 @@ import * as spawnUtils from "../../../utils/spawn.js";
 describe("buildACPClientCapabilities", () => {
   test("keeps filesystem and terminal execution with the agent by default", () => {
     expect(buildACPClientCapabilities()).toEqual({
+      elicitation: { form: {} },
       fs: {
         readTextFile: false,
         writeTextFile: false,
@@ -74,6 +75,7 @@ describe("buildACPClientCapabilities", () => {
         },
       ),
     ).toEqual({
+      elicitation: { form: {} },
       fs: {
         readTextFile: true,
         writeTextFile: false,
@@ -1262,6 +1264,151 @@ describe("ACPAgentSession Zed parity", () => {
     });
   });
 
+  test("renders ACP form elicitation requests and returns typed answers", async () => {
+    const session = createSessionWithConfig({ provider: "generic-acp" });
+    const events: AgentStreamEvent[] = [];
+
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    session.subscribe((event) => events.push(event));
+
+    const elicitation = session.extMethod("session/elicitation", {
+      sessionId: "session-1",
+      mode: "form",
+      message: "Configure the next run",
+      requestedSchema: {
+        type: "object",
+        required: ["model", "count", "enabled", "tags"],
+        properties: {
+          model: {
+            type: "string",
+            title: "Model",
+            enum: ["fast", "accurate"],
+          },
+          count: { type: "integer", minimum: 1 },
+          enabled: { type: "boolean" },
+          tags: {
+            type: "array",
+            items: { type: "string", enum: ["one", "two"] },
+          },
+        },
+      },
+    });
+
+    const requested = events.find((event) => event.type === "permission_requested");
+    expect(requested).toMatchObject({
+      type: "permission_requested",
+      request: {
+        kind: "question",
+        title: "Configure the next run",
+        input: {
+          questions: [
+            {
+              question: "Model",
+              header: "model",
+              options: [{ label: "fast" }, { label: "accurate" }],
+              multiSelect: false,
+              allowOther: false,
+              allowEmpty: false,
+            },
+            {
+              question: "count",
+              header: "count",
+              options: [],
+              multiSelect: false,
+              allowOther: true,
+              allowEmpty: false,
+            },
+            {
+              question: "enabled",
+              header: "enabled",
+              options: [{ label: "Yes" }, { label: "No" }],
+              multiSelect: false,
+              allowOther: false,
+              allowEmpty: false,
+            },
+            {
+              question: "tags",
+              header: "tags",
+              options: [{ label: "one" }, { label: "two" }],
+              multiSelect: true,
+              allowOther: false,
+              allowEmpty: false,
+            },
+          ],
+        },
+      },
+    });
+    if (requested?.type !== "permission_requested") {
+      throw new Error("Expected elicitation request");
+    }
+
+    await session.respondToPermission(requested.request.id, {
+      behavior: "allow",
+      updatedInput: {
+        ...requested.request.input,
+        answers: {
+          model: "accurate",
+          count: "3",
+          enabled: "Yes",
+          tags: "one, two",
+        },
+      },
+    });
+
+    await expect(elicitation).resolves.toEqual({
+      action: {
+        action: "accept",
+        content: {
+          model: "accurate",
+          count: 3,
+          enabled: true,
+          tags: ["one", "two"],
+        },
+      },
+    });
+  });
+
+  test("keeps ACP elicitation pending after an invalid form answer", async () => {
+    const session = createSessionWithConfig({ provider: "generic-acp" });
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+
+    const elicitation = session.extMethod("session/elicitation", {
+      sessionId: "session-1",
+      mode: "form",
+      message: "Choose a model",
+      requestedSchema: {
+        type: "object",
+        required: ["model"],
+        properties: {
+          model: { type: "string", enum: ["fast", "accurate"] },
+        },
+      },
+    });
+    await Promise.resolve();
+
+    const pending = session.getPendingPermissions()[0];
+    if (!pending) {
+      throw new Error("Expected pending elicitation");
+    }
+
+    await expect(
+      session.respondToPermission(pending.id, {
+        behavior: "allow",
+        updatedInput: {
+          ...pending.input,
+          answers: { model: "unsupported" },
+        },
+      }),
+    ).rejects.toThrow("not one of the available options");
+    expect(session.getPendingPermissions()).toHaveLength(1);
+
+    await session.respondToPermission(pending.id, {
+      behavior: "deny",
+      message: "Dismissed by user",
+    });
+    await expect(elicitation).resolves.toEqual({ action: { action: "decline" } });
+  });
+
   test("preserves ACP permission requests after invalid selected actions", async () => {
     const session = createSessionWithConfig({ provider: "generic-acp" });
     const events: AgentStreamEvent[] = [];
@@ -1391,6 +1538,59 @@ describe("ACPAgentSession Zed parity", () => {
     await session.respondToPermission(requested.request.id, {
       behavior: "allow",
       selectedActionId: "q0_opt_0",
+    });
+    await expect(permission).resolves.toEqual({
+      outcome: { outcome: "selected", optionId: "q0_opt_0" },
+    });
+  });
+
+  test("recognizes a single-option AskUserQuestion permission as a chooser", async () => {
+    const session = createSessionWithConfig({ provider: "generic-acp" });
+    const events: AgentStreamEvent[] = [];
+
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    session.subscribe((event) => events.push(event));
+
+    const permission = session.requestPermission({
+      sessionId: "session-1",
+      toolCall: {
+        toolCallId: "question-1",
+        title: "AskUserQuestion",
+        status: "pending",
+      },
+      options: [
+        { optionId: "q0_opt_0", name: "Continue", kind: "allow_once" },
+        { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+      ],
+    } satisfies RequestPermissionRequest);
+
+    await Promise.resolve();
+
+    const requested = events.find((event) => event.type === "permission_requested");
+    expect(requested).toMatchObject({
+      type: "permission_requested",
+      request: {
+        kind: "question",
+        input: {
+          questions: [
+            {
+              question: "AskUserQuestion",
+              options: [{ label: "Continue" }],
+            },
+          ],
+        },
+      },
+    });
+    if (requested?.type !== "permission_requested") {
+      throw new Error("Expected permission request");
+    }
+
+    await session.respondToPermission(requested.request.id, {
+      behavior: "allow",
+      updatedInput: {
+        ...requested.request.input,
+        answers: { Response: "Continue" },
+      },
     });
     await expect(permission).resolves.toEqual({
       outcome: { outcome: "selected", optionId: "q0_opt_0" },

@@ -8,6 +8,8 @@ import {
   type ACPCatalogModelResolver,
   type ACPClientCapabilityMeta,
   type ACPConfigFeatureOption,
+  type ACPProviderModelWriterContext,
+  type ACPProviderModelWriteResult,
   DEFAULT_ACP_CAPABILITIES,
   type ACPExtensionCommandsParser,
 } from "./acp-agent.js";
@@ -51,6 +53,9 @@ interface GenericACPAgentClientOptions {
   configFeatureOptions?: ACPConfigFeatureOption[];
   extensionCommandsParser?: ACPExtensionCommandsParser;
   catalogModelResolver?: ACPCatalogModelResolver;
+  providerModelWriter?: (
+    context: ACPProviderModelWriterContext,
+  ) => Promise<ACPProviderModelWriteResult>;
 }
 
 export class GenericACPAgentClient extends ACPAgentClient {
@@ -76,6 +81,7 @@ export class GenericACPAgentClient extends ACPAgentClient {
       configFeatureOptions: options.configFeatureOptions,
       extensionCommandsParser: options.extensionCommandsParser,
       catalogModelResolver: options.catalogModelResolver,
+      providerModelWriter: options.providerModelWriter,
     });
 
     this.command = options.command;

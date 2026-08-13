@@ -134,6 +134,7 @@ describe("GenericACPAgentClient diagnostics", () => {
       expect(initializeRequests).toEqual([
         {
           clientCapabilities: {
+            elicitation: { form: {} },
             fs: {
               readTextFile: true,
               writeTextFile: true,
@@ -143,6 +144,7 @@ describe("GenericACPAgentClient diagnostics", () => {
         },
         {
           clientCapabilities: {
+            elicitation: { form: {} },
             fs: {
               readTextFile: true,
               writeTextFile: true,
