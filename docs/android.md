@@ -168,6 +168,8 @@ Beta tags like `v0.1.1-beta.1` only trigger the GitHub APK workflow. They publis
 
 `android-v*` tags also trigger only the GitHub APK workflow — useful when you want to ship an APK without going through stores. The GitHub APK workflow supports `workflow_dispatch` with an existing `tag` input so you can rebuild without cutting a new tag.
 
+For a development/debug APK, run the `Android Debug APK` GitHub workflow and provide the branch, tag, or commit to build. It generates the `sh.paseo.debug` variant and uploads the APK as a workflow artifact without requiring EAS credentials.
+
 ### Useful commands
 
 ```bash

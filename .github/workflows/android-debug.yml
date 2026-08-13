@@ -1,0 +1,84 @@
+name: Android Debug APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      checkout_ref:
+        description: "Branch, tag, or commit to build"
+        required: false
+        default: "main"
+        type: string
+
+concurrency:
+  group: android-debug-apk-${{ github.event.inputs.checkout_ref || github.ref }}
+  cancel-in-progress: false
+
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+jobs:
+  build:
+    name: Build Android debug APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build client dependencies
+        run: npm run build:client
+
+      - name: Generate Android project
+        working-directory: packages/app
+        run: APP_VARIANT=development npx expo prebuild --platform android --clean --non-interactive
+
+      - name: Build debug APK
+        working-directory: packages/app/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --max-workers=2
+
+      - name: Prepare APK artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          artifact_name="paseo-${version}-debug.apk"
+          cp packages/app/android/app/build/outputs/apk/debug/app-debug.apk "$artifact_name"
+          echo "name=$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk-${{ github.run_number }}
+          path: ${{ steps.artifact.outputs.name }}
+          if-no-files-found: error
+          retention-days: 14
