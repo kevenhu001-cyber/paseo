@@ -4,6 +4,10 @@ const sourceTagPattern =
   /^(?:(?:desktop(?:-(?:windows|linux|macos))?|android)-)?v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const legacyBetaTagPattern =
   /^(?:(desktop(?:-(?:windows|linux|macos))?|android)-)?v(\d+\.\d+\.\d+)\.beta\.(\d+)$/;
+const bareSourceTagPattern =
+  /^(?:(?:desktop(?:-(?:windows|linux|macos))?|android)-)?(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
+const bareLegacyBetaTagPattern =
+  /^(?:(desktop(?:-(?:windows|linux|macos))?|android)-)?(\d+\.\d+\.\d+)\.beta\.(\d+)$/;
 
 function assertInteger(value, label) {
   if (!Number.isInteger(value) || value < 0) {
@@ -62,17 +66,36 @@ export function formatReleaseVersion({ major, minor, patch, prerelease = null })
 
 export function normalizeReleaseTag(rawTag) {
   const trimmed = rawTag.trim().replace(/^refs\/tags\//, "");
-  const legacyBetaMatch = trimmed.match(legacyBetaTagPattern);
-  const normalizedTag = legacyBetaMatch
-    ? `${legacyBetaMatch[1] ? `${legacyBetaMatch[1]}-` : ""}v${legacyBetaMatch[2]}-beta.${legacyBetaMatch[3]}`
-    : trimmed;
-  const match = normalizedTag.match(sourceTagPattern);
-  if (!match?.groups?.version) {
-    throw new Error(
-      `Unsupported release tag "${rawTag}". Expected vX.Y.Z, vX.Y.Z-beta.N, legacy vX.Y.Z.beta.N, desktop-v..., or android-v...`,
-    );
+
+  // Try legacy beta with v prefix, then bare legacy beta (without v)
+  let legacyBetaMatch = trimmed.match(legacyBetaTagPattern);
+  let normalizedTag;
+  if (legacyBetaMatch) {
+    normalizedTag = `${legacyBetaMatch[1] ? `${legacyBetaMatch[1]}-` : ""}v${legacyBetaMatch[2]}-beta.${legacyBetaMatch[3]}`;
+  } else {
+    legacyBetaMatch = trimmed.match(bareLegacyBetaTagPattern);
+    if (legacyBetaMatch) {
+      normalizedTag = `${legacyBetaMatch[1] ? `${legacyBetaMatch[1]}-` : ""}v${legacyBetaMatch[2]}-beta.${legacyBetaMatch[3]}`;
+    } else {
+      normalizedTag = trimmed;
+    }
   }
-  return `v${match.groups.version}`;
+
+  // Try matching with v prefix first
+  let match = normalizedTag.match(sourceTagPattern);
+  if (match?.groups?.version) {
+    return `v${match.groups.version}`;
+  }
+
+  // Fall back to bare version (no v prefix)
+  match = normalizedTag.match(bareSourceTagPattern);
+  if (match?.groups?.version) {
+    return `v${match.groups.version}`;
+  }
+
+  throw new Error(
+    `Unsupported release tag "${rawTag}". Expected vX.Y.Z, vX.Y.Z-beta.N, legacy vX.Y.Z.beta.N, bare X.Y.Z, desktop-v..., or android-v...`,
+  );
 }
 
 export function getReleaseInfoFromSourceTag(sourceTag) {

@@ -62,6 +62,19 @@ jobs:
             echo "Release creation raced with another workflow; continuing."
           fi
 
+      - name: Check Expo credentials
+        id: expo
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [[ -n "$EXPO_TOKEN" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::EXPO_TOKEN is not configured; skipping the APK build."
+          fi
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -76,6 +89,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Expo and EAS
+        if: steps.expo.outputs.available == 'true'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
@@ -83,6 +97,7 @@ jobs:
 
       - name: Build Android APK on EAS
         id: eas_build
+        if: steps.expo.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -102,6 +117,7 @@ jobs:
 
       - name: Resolve APK artifact URL
         id: artifact
+        if: steps.expo.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -126,7 +142,12 @@ jobs:
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK to GitHub Release
+        if: steps.expo.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "${{ github.repository }}"
+
+      - name: Skip APK build
+        if: steps.expo.outputs.available != 'true'
+        run: echo "APK build skipped because EXPO_TOKEN is unavailable."

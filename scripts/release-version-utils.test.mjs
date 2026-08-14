@@ -54,6 +54,13 @@ test("normalizes legacy dotted beta tags used by manual release runs", () => {
   assert.equal(normalizeReleaseTag("desktop-macos-v0.4.0.beta.3"), "v0.4.0-beta.3");
 });
 
+test("normalizes bare version tags (no v prefix)", () => {
+  assert.equal(normalizeReleaseTag("0.4.2"), "v0.4.2");
+  assert.equal(normalizeReleaseTag("0.4.2-beta.1"), "v0.4.2-beta.1");
+  assert.equal(normalizeReleaseTag("desktop-macos-0.4.2"), "v0.4.2");
+  assert.equal(normalizeReleaseTag("0.4.0.beta.3"), "v0.4.0-beta.3");
+});
+
 test("rejects non-beta prerelease versions", () => {
   assert.throws(() => parseReleaseVersion("0.1.60-canary.1"), /Expected beta prerelease versions/);
 });

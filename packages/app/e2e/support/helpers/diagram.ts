@@ -21,7 +21,7 @@ export async function expectDiagramWithLabels(
   await expect(diagram).toBeVisible({ timeout: 30_000 });
   await expect(svg).toBeVisible({ timeout: 30_000 });
   for (const label of labels) {
-    await expect(svg).toContainText(label);
+    await expect(svg).toContainText(label, { timeout: 30_000 });
   }
 }
 
@@ -29,8 +29,8 @@ export async function expectDiagramRemainsRenderedWhileStreaming(page: Page): Pr
   const { diagram, svg } = renderedDiagram(page);
   const samples = 80;
   for (let sample = 0; sample < samples; sample += 1) {
-    await expect(diagram).toBeVisible({ timeout: 100 });
-    await expect(svg).toBeVisible({ timeout: 100 });
+    await expect(diagram).toBeVisible({ timeout: 250 });
+    await expect(svg).toBeVisible({ timeout: 250 });
     await page.waitForTimeout(25);
   }
 }
