@@ -529,6 +529,8 @@ export const es: TranslationResources = {
         screenshotCopied: "Captura copiada al portapapeles",
         elementCopied: "Elemento copiado al portapapeles",
         screenshotFailed: "No se pudo copiar la captura",
+        selectorLoading: "Espera a que la página termine de cargar",
+        selectorFailed: "No se pudo iniciar el selector de elementos",
       },
       annotate: {
         title: "Anotar elemento",
