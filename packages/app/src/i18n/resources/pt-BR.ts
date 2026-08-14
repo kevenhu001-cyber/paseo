@@ -206,6 +206,8 @@ export const ptBR: TranslationResources = {
       implement: "Implementar",
       question: "Como você quer prosseguir?",
       proposedPlan: "Plano proposto",
+      responseFailed:
+        "Não foi possível enviar sua resposta. O agente não a recebeu e o turno continua aguardando.",
     },
   },
   agentPanel: {

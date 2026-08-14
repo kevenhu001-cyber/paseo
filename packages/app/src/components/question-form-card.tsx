@@ -1,6 +1,15 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useState, useCallback, useMemo } from "react";
-import { View, Text, TextInput, Pressable, type PressableStateCallbackType } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  type PressableStateCallbackType,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
+} from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { Check, X } from "lucide-react-native";
@@ -13,6 +22,7 @@ import {
   buildQuestionFormQuestionsFromActions,
   buildQuestionFormAnswers,
   isQuestionAnswered,
+  mergeQuestionsWithActionFallback,
   parseQuestionFormQuestions,
   questionShowsTextInput,
   resolveDismissLabel,
@@ -41,6 +51,70 @@ function getQuestionInputPlaceholder({
   return (
     question.placeholder ?? (question.options.length === 0 ? answerPlaceholder : otherPlaceholder)
   );
+}
+
+function useQuestionFormQuestions(permission: PendingPermission): QuestionFormQuestion[] | null {
+  return useMemo(() => {
+    const parsed = parseQuestionFormQuestions(permission.request.input);
+    const fallback = buildQuestionFormQuestionsFromActions(
+      permission.request.actions,
+      permission.request.title ?? permission.request.name,
+    );
+    // ACP chooser requests expose the same choices as permission actions. If
+    // a provider drops the form options while serializing the request, retain
+    // those action labels so the user still has a usable choice card. The
+    // merge happens per-question so a single-question chooser — the most
+    // common shape — does not end up with only a text input.
+    return mergeQuestionsWithActionFallback(parsed, fallback);
+  }, [
+    permission.request.actions,
+    permission.request.input,
+    permission.request.name,
+    permission.request.title,
+  ]);
+}
+
+function computeNextSelection(
+  current: Set<number> | undefined,
+  optIndex: number,
+  multiSelect: boolean,
+): Set<number> {
+  const next = new Set(current ?? []);
+  if (multiSelect) {
+    if (next.has(optIndex)) {
+      next.delete(optIndex);
+    } else {
+      next.add(optIndex);
+    }
+    return next;
+  }
+  if (next.has(optIndex)) {
+    next.clear();
+  } else {
+    next.clear();
+    next.add(optIndex);
+  }
+  return next;
+}
+
+function clearOtherTextForIndex(
+  prev: Record<number, string>,
+  qIndex: number,
+): Record<number, string> {
+  if (!prev[qIndex]) return prev;
+  const nextTexts = { ...prev };
+  delete nextTexts[qIndex];
+  return nextTexts;
+}
+
+function shouldAdvanceAfterSelect(
+  multiSelect: boolean,
+  next: Set<number>,
+  qIndex: number,
+  activeQuestionIndex: number,
+  questions: QuestionFormQuestion[] | null,
+): boolean {
+  return !multiSelect && next.size > 0 && qIndex === activeQuestionIndex && Boolean(questions);
 }
 
 interface QuestionOptionRowProps {
@@ -314,43 +388,223 @@ function QuestionOtherInput({
   );
 }
 
+interface QuestionFormCardEmptyProps {
+  containerStyle: StyleProp<ViewStyle>;
+  questionTextStyle: StyleProp<TextStyle>;
+  actionsContainerStyle: StyleProp<ViewStyle>;
+  dismissButtonStyle:
+    | StyleProp<ViewStyle>
+    | ((state: PressableStateCallbackType & { hovered?: boolean }) => StyleProp<ViewStyle>);
+  dismissActionTextStyle: StyleProp<TextStyle>;
+  dismissLabel: string;
+  title: string;
+  isResponding: boolean;
+  isDismissing: boolean;
+  onDeny: () => void;
+}
+
+function QuestionFormCardEmpty({
+  containerStyle,
+  questionTextStyle,
+  actionsContainerStyle,
+  dismissButtonStyle,
+  dismissActionTextStyle,
+  dismissLabel,
+  title,
+  isResponding,
+  isDismissing,
+  onDeny,
+}: QuestionFormCardEmptyProps) {
+  const { theme } = useUnistyles();
+  return (
+    <View style={containerStyle} testID="question-form-card-empty">
+      <Text style={questionTextStyle}>{title}</Text>
+      <View style={actionsContainerStyle}>
+        <Pressable
+          style={dismissButtonStyle as StyleProp<ViewStyle>}
+          onPress={onDeny}
+          disabled={isResponding}
+          accessibilityRole="button"
+          accessibilityLabel={dismissLabel}
+          testID="question-form-dismiss"
+        >
+          {isDismissing ? (
+            <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
+          ) : (
+            <View style={styles.actionContent}>
+              <X size={14} color={theme.colors.foregroundMuted} />
+              <Text style={dismissActionTextStyle}>{dismissLabel}</Text>
+            </View>
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+interface QuestionFormCardBodyProps {
+  questions: QuestionFormQuestion[];
+  activeQuestion: QuestionFormQuestion | undefined;
+  activeQuestionIndex: number;
+  navIsAnswered: (qIndex: number) => boolean;
+  onSelectQuestion: (index: number) => void;
+  isResponding: boolean;
+  questionTextStyle: StyleProp<TextStyle>;
+  containerStyle: StyleProp<ViewStyle>;
+  actionsContainerStyle: StyleProp<ViewStyle>;
+  optionsGroupAccessibility: Record<string, unknown>;
+  selected: Set<number>;
+  showTextInput: boolean;
+  otherText: string;
+  answerPlaceholder: string;
+  otherPlaceholder: string;
+  onToggleOption: (qIndex: number, optIndex: number, multiSelect: boolean) => void;
+  onChangeOtherText: (qIndex: number, text: string) => void;
+  onPrimaryAction: () => void;
+  onDeny: () => void;
+  dismissLabel: string;
+  primaryActionLabel: string;
+  primaryDisabled: boolean;
+  isSubmitting: boolean;
+  isDismissing: boolean;
+  submitButtonStyle:
+    | StyleProp<ViewStyle>
+    | ((state: PressableStateCallbackType & { hovered?: boolean }) => StyleProp<ViewStyle>);
+  dismissButtonStyle:
+    | StyleProp<ViewStyle>
+    | ((state: PressableStateCallbackType & { hovered?: boolean }) => StyleProp<ViewStyle>);
+  submitActionTextStyle: StyleProp<TextStyle>;
+  dismissActionTextStyle: StyleProp<TextStyle>;
+}
+
+function QuestionFormCardBody({
+  questions,
+  activeQuestion,
+  activeQuestionIndex,
+  navIsAnswered,
+  onSelectQuestion,
+  isResponding,
+  questionTextStyle,
+  containerStyle,
+  actionsContainerStyle,
+  optionsGroupAccessibility,
+  selected,
+  showTextInput,
+  otherText,
+  answerPlaceholder,
+  otherPlaceholder,
+  onToggleOption,
+  onChangeOtherText,
+  onPrimaryAction,
+  onDeny,
+  dismissLabel,
+  primaryActionLabel,
+  primaryDisabled,
+  isSubmitting,
+  isDismissing,
+  submitButtonStyle,
+  dismissButtonStyle,
+  submitActionTextStyle,
+  dismissActionTextStyle,
+}: QuestionFormCardBodyProps) {
+  const { theme } = useUnistyles();
+  return (
+    <View style={containerStyle} testID="question-form-card">
+      <QuestionNav
+        questions={questions}
+        activeIndex={activeQuestionIndex}
+        isAnswered={navIsAnswered}
+        isResponding={isResponding}
+        onSelect={onSelectQuestion}
+      />
+      <View style={styles.questionHeader}>
+        <Text testID="question-form-current-question" style={questionTextStyle}>
+          {activeQuestion?.question}
+        </Text>
+      </View>
+
+      {activeQuestion ? (
+        <View key={activeQuestion.question} style={styles.questionBlock}>
+          {activeQuestion.options.length > 0 ? (
+            <View style={styles.optionsWrap} {...(optionsGroupAccessibility as object)}>
+              {activeQuestion.options.map((opt, optIndex) => (
+                <QuestionOptionRow
+                  key={opt.label}
+                  qIndex={activeQuestionIndex}
+                  optIndex={optIndex}
+                  option={opt}
+                  isSelected={selected.has(optIndex)}
+                  multiSelect={activeQuestion.multiSelect}
+                  isResponding={isResponding}
+                  onToggle={onToggleOption}
+                />
+              ))}
+            </View>
+          ) : null}
+          {showTextInput ? (
+            <QuestionOtherInput
+              qIndex={activeQuestionIndex}
+              accessibilityLabel={activeQuestion.question}
+              value={otherText}
+              placeholder={getQuestionInputPlaceholder({
+                question: activeQuestion,
+                answerPlaceholder,
+                otherPlaceholder,
+              })}
+              isResponding={isResponding}
+              onChange={onChangeOtherText}
+              onSubmit={onPrimaryAction}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      <View style={actionsContainerStyle}>
+        <Pressable
+          style={dismissButtonStyle as StyleProp<ViewStyle>}
+          onPress={onDeny}
+          disabled={isResponding}
+          accessibilityRole="button"
+          accessibilityLabel={dismissLabel}
+          testID="question-form-dismiss"
+        >
+          {isDismissing ? (
+            <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
+          ) : (
+            <View style={styles.actionContent}>
+              <X size={14} color={theme.colors.foregroundMuted} />
+              <Text style={dismissActionTextStyle}>{dismissLabel}</Text>
+            </View>
+          )}
+        </Pressable>
+
+        <Pressable
+          style={submitButtonStyle as StyleProp<ViewStyle>}
+          onPress={onPrimaryAction}
+          disabled={primaryDisabled}
+          accessibilityRole="button"
+          accessibilityLabel={primaryActionLabel}
+          testID="question-form-primary-action"
+        >
+          {isSubmitting ? (
+            <LoadingSpinner size="small" color={theme.colors.accentForeground} />
+          ) : (
+            <View style={styles.actionContent}>
+              <Check size={14} color={theme.colors.accentForeground} />
+              <Text style={submitActionTextStyle}>{primaryActionLabel}</Text>
+            </View>
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function QuestionFormCard({ permission, onRespond, isResponding }: QuestionFormCardProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
-  const questions = useMemo(() => {
-    const parsed = parseQuestionFormQuestions(permission.request.input);
-    const fallback = buildQuestionFormQuestionsFromActions(
-      permission.request.actions,
-      permission.request.title ?? permission.request.name,
-    );
-    if (!fallback) {
-      return parsed;
-    }
-    if (!parsed) {
-      return fallback;
-    }
-
-    // ACP chooser requests expose the same choices as permission actions. If
-    // a provider drops the form options while serializing the request, retain
-    // those action labels so the user still has a usable choice card.
-    if (parsed.every((question) => question.options.length === 0)) {
-      const [fallbackQuestion] = fallback;
-      const [firstQuestion, ...remainingQuestions] = parsed;
-      if (fallbackQuestion && firstQuestion) {
-        return [
-          { ...firstQuestion, options: fallbackQuestion.options, allowOther: false },
-          ...remainingQuestions,
-        ];
-      }
-    }
-    return parsed;
-  }, [
-    permission.request.actions,
-    permission.request.input,
-    permission.request.name,
-    permission.request.title,
-  ]);
+  const questions = useQuestionFormQuestions(permission);
 
   const [selections, setSelections] = useState<Record<number, Set<number>>>({});
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
@@ -359,30 +613,15 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
 
   const toggleOption = useCallback(
     (qIndex: number, optIndex: number, multiSelect: boolean) => {
-      const current = selections[qIndex] ?? new Set<number>();
-      const next = new Set(current);
-      if (multiSelect) {
-        if (next.has(optIndex)) {
-          next.delete(optIndex);
-        } else {
-          next.add(optIndex);
-        }
-      } else if (next.has(optIndex)) {
-        next.clear();
-      } else {
-        next.clear();
-        next.add(optIndex);
-      }
+      const next = computeNextSelection(selections[qIndex], optIndex, multiSelect);
 
       setSelections((prev) => ({ ...prev, [qIndex]: next }));
-      setOtherTexts((prev) => {
-        if (!prev[qIndex]) return prev;
-        const nextTexts = { ...prev };
-        delete nextTexts[qIndex];
-        return nextTexts;
-      });
+      setOtherTexts((prev) => clearOtherTextForIndex(prev, qIndex));
 
-      if (!multiSelect && next.size > 0 && qIndex === activeQuestionIndex && questions) {
+      if (
+        questions &&
+        shouldAdvanceAfterSelect(multiSelect, next, qIndex, activeQuestionIndex, questions)
+      ) {
         setActiveQuestionIndex(Math.min(qIndex + 1, questions.length - 1));
       }
     },
@@ -430,9 +669,8 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
   ]);
 
   const handleDeny = useCallback(() => {
-    if (!questions) return;
     setRespondingAction("dismiss");
-    if (shouldSubmitEmptyOnDismiss(questions)) {
+    if (questions && shouldSubmitEmptyOnDismiss(questions)) {
       onRespond({
         behavior: "allow",
         updatedInput: {
@@ -535,104 +773,70 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
     [submitActionTextColor],
   );
 
-  if (!questions) {
-    return null;
-  }
-
-  const dismissLabel = resolveDismissLabel(questions, t("common.actions.dismiss"));
+  const hasQuestions = Boolean(questions && questions.length > 0);
+  const dismissLabel = hasQuestions
+    ? resolveDismissLabel(questions!, t("common.actions.dismiss"))
+    : t("common.actions.dismiss");
   const selected = selections[resolvedActiveQuestionIndex] ?? new Set<number>();
   const otherText = otherTexts[resolvedActiveQuestionIndex] ?? "";
   const showTextInput = activeQuestion ? questionShowsTextInput(activeQuestion) : false;
 
-  return (
-    <View style={containerStyle} testID="question-form-card">
-      <QuestionNav
-        questions={questions}
-        activeIndex={resolvedActiveQuestionIndex}
-        isAnswered={navIsAnswered}
+  // Last-resort fallback: the chooser payload had no questions we could parse
+  // and no action labels to fall back to. We still surface a dismiss button so
+  // the user is never stranded — the turn can at least be cancelled instead
+  // of waiting forever.
+  if (!hasQuestions) {
+    return (
+      <QuestionFormCardEmpty
+        containerStyle={containerStyle}
+        questionTextStyle={questionTextStyle}
+        actionsContainerStyle={actionsContainerStyle}
+        dismissButtonStyle={dismissButtonStyle}
+        dismissActionTextStyle={dismissActionTextStyle}
+        dismissLabel={dismissLabel}
+        title={permission.request.title ?? permission.request.name}
         isResponding={isResponding}
-        onSelect={handleSelectQuestion}
+        isDismissing={respondingAction === "dismiss"}
+        onDeny={handleDeny}
       />
-      <View style={styles.questionHeader}>
-        <Text testID="question-form-current-question" style={questionTextStyle}>
-          {activeQuestion?.question}
-        </Text>
-      </View>
+    );
+  }
 
-      {activeQuestion ? (
-        <View key={activeQuestion.question} style={styles.questionBlock}>
-          {activeQuestion.options.length > 0 ? (
-            <View style={styles.optionsWrap} {...optionsGroupAccessibility}>
-              {activeQuestion.options.map((opt, optIndex) => (
-                <QuestionOptionRow
-                  key={opt.label}
-                  qIndex={resolvedActiveQuestionIndex}
-                  optIndex={optIndex}
-                  option={opt}
-                  isSelected={selected.has(optIndex)}
-                  multiSelect={activeQuestion.multiSelect}
-                  isResponding={isResponding}
-                  onToggle={toggleOption}
-                />
-              ))}
-            </View>
-          ) : null}
-          {showTextInput ? (
-            <QuestionOtherInput
-              qIndex={resolvedActiveQuestionIndex}
-              accessibilityLabel={activeQuestion.question}
-              value={otherText}
-              placeholder={getQuestionInputPlaceholder({
-                question: activeQuestion,
-                answerPlaceholder: t("message.question.answerPlaceholder"),
-                otherPlaceholder: t("message.question.otherPlaceholder"),
-              })}
-              isResponding={isResponding}
-              onChange={setOtherText}
-              onSubmit={handlePrimaryAction}
-            />
-          ) : null}
-        </View>
-      ) : null}
+  if (!questions) {
+    return null;
+  }
 
-      <View style={actionsContainerStyle}>
-        <Pressable
-          style={dismissButtonStyle}
-          onPress={handleDeny}
-          disabled={isResponding}
-          accessibilityRole="button"
-          accessibilityLabel={dismissLabel}
-          testID="question-form-dismiss"
-        >
-          {respondingAction === "dismiss" ? (
-            <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
-          ) : (
-            <View style={styles.actionContent}>
-              <X size={14} color={theme.colors.foregroundMuted} />
-              <Text style={dismissActionTextStyle}>{dismissLabel}</Text>
-            </View>
-          )}
-        </Pressable>
-
-        <Pressable
-          style={submitButtonStyle}
-          onPress={handlePrimaryAction}
-          disabled={primaryDisabled}
-          accessibilityRole="button"
-          accessibilityLabel={primaryActionLabel}
-          testID="question-form-primary-action"
-        >
-          {respondingAction === "submit" ? (
-            <LoadingSpinner size="small" color={theme.colors.accentForeground} />
-          ) : (
-            <View style={styles.actionContent}>
-              <Check size={14} color={submitActionTextColor} />
-              <Text style={submitActionTextStyle}>{primaryActionLabel}</Text>
-            </View>
-          )}
-        </Pressable>
-      </View>
-    </View>
+  return (
+    <QuestionFormCardBody
+      questions={questions}
+      activeQuestion={activeQuestion}
+      activeQuestionIndex={resolvedActiveQuestionIndex}
+      navIsAnswered={navIsAnswered}
+      onSelectQuestion={handleSelectQuestion}
+      isResponding={isResponding}
+      questionTextStyle={questionTextStyle}
+      containerStyle={containerStyle}
+      actionsContainerStyle={actionsContainerStyle}
+      optionsGroupAccessibility={optionsGroupAccessibility}
+      selected={selected}
+      showTextInput={showTextInput}
+      otherText={otherText}
+      answerPlaceholder={t("message.question.answerPlaceholder")}
+      otherPlaceholder={t("message.question.otherPlaceholder")}
+      onToggleOption={toggleOption}
+      onChangeOtherText={setOtherText}
+      onPrimaryAction={handlePrimaryAction}
+      onDeny={handleDeny}
+      dismissLabel={dismissLabel}
+      primaryActionLabel={primaryActionLabel}
+      primaryDisabled={primaryDisabled}
+      isSubmitting={respondingAction === "submit"}
+      isDismissing={respondingAction === "dismiss"}
+      submitButtonStyle={submitButtonStyle}
+      dismissButtonStyle={dismissButtonStyle}
+      submitActionTextStyle={submitActionTextStyle}
+      dismissActionTextStyle={dismissActionTextStyle}
+    />
   );
 }
 

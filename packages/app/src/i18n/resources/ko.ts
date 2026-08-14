@@ -206,6 +206,7 @@ export const ko: TranslationResources = {
       implement: "구현",
       question: "어떻게 진행할까요?",
       proposedPlan: "제안된 계획",
+      responseFailed: "답장을 보낼 수 없습니다. 에이전트가 받지 못했고 턴이 계속 대기 중입니다.",
     },
   },
   agentPanel: {

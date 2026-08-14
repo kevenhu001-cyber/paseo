@@ -206,6 +206,8 @@ export const es: TranslationResources = {
       implement: "Implementar",
       question: "¿Cómo le gustaría proceder?",
       proposedPlan: "Plan propuesto",
+      responseFailed:
+        "No se pudo enviar tu respuesta. El agente no la recibió y el turno sigue esperando.",
     },
   },
   agentPanel: {

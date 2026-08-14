@@ -206,6 +206,7 @@ export const ar: TranslationResources = {
       implement: "ينفذ",
       question: "كيف تريد المتابعة؟",
       proposedPlan: "الخطة المقترحة",
+      responseFailed: "تعذر إرسال إجابتك. لم يتلقَّ الوكيل إجابتك والدور لا يزال قيد الانتظار.",
     },
   },
   agentPanel: {

@@ -2253,8 +2253,13 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       );
     }
     if (pending.request.kind === "question" && response.behavior === "allow" && !selectedOption) {
+      // The question had no allow_* options at all (or none survived the
+      // answer-to-option match). Surface this as a hard error so the turn
+      // does not stall; the UI turns it into a toast and the agent learns
+      // its chooser request was unanswerable.
       throw new Error("ACP question response did not select an available option");
     }
+    warnIfQuestionAnswerFellBack(this.logger, pending.request, response, selectedOption);
 
     this.pendingPermissions.delete(requestId);
     pending.resolve(
@@ -3754,15 +3759,24 @@ function selectPermissionOption(
     if (answers.length === 0) {
       return null;
     }
-    return (
-      options.find(
-        (option) =>
-          option.kind.startsWith("allow") &&
-          answers.some(
-            (answer) => normalizeQuestionAnswer(answer) === normalizeQuestionAnswer(option.name),
-          ),
-      ) ?? null
+    const exactMatch = options.find(
+      (option) =>
+        option.kind.startsWith("allow") &&
+        answers.some(
+          (answer) => normalizeQuestionAnswer(answer) === normalizeQuestionAnswer(option.name),
+        ),
     );
+    if (exactMatch) {
+      return exactMatch;
+    }
+    // No label in the answers matches any of the predefined options. The
+    // chooser UI may have shown only a freeform input (e.g. the provider
+    // dropped the option list, or every option was filtered out by the
+    // ask_user tool). Pick the first allow option so the agent still
+    // gets a usable response and the turn does not stall. The freeform
+    // text stays in the response payload for the agent to read if it
+    // wants to.
+    return options.find((option) => option.kind.startsWith("allow")) ?? null;
   }
 
   const order =
@@ -3776,6 +3790,43 @@ function selectPermissionOption(
     }
   }
   return null;
+}
+
+function questionAnswerMatchesOption(
+  input: AgentMetadata | undefined,
+  option: PermissionOption,
+): boolean {
+  const answers = extractQuestionAnswerLabels(input);
+  if (answers.length === 0) {
+    return false;
+  }
+  const normalized = normalizeQuestionAnswer(option.name);
+  return answers.some((answer) => normalizeQuestionAnswer(answer) === normalized);
+}
+
+function warnIfQuestionAnswerFellBack(
+  logger: Logger,
+  request: AgentPermissionRequest,
+  response: AgentPermissionResponse,
+  selectedOption: PermissionOption | null,
+): void {
+  if (
+    request.kind !== "question" ||
+    response.behavior !== "allow" ||
+    response.selectedActionId !== undefined ||
+    !selectedOption ||
+    questionAnswerMatchesOption(response.updatedInput, selectedOption)
+  ) {
+    return;
+  }
+  // The user typed freeform text that did not match any predefined option.
+  // We fall back to the first allow option so the agent still gets a
+  // response; surface the mismatch so providers with strict chooser
+  // contracts can be investigated.
+  logger.warn(
+    { toolCallId: request.metadata?.toolCallId, optionId: selectedOption.optionId },
+    "ACP question answer did not match any predefined option; falling back to first allow option",
+  );
 }
 
 function isACPChooserRequest(
@@ -4010,29 +4061,42 @@ function parseElicitationAnswer(
     return value;
   }
   if (field.options.length > 0) {
-    const value = resolveElicitationOption(field.options, answer);
-    if (typeof value !== "string") {
-      throw new Error(`ACP elicitation answer for '${field.key}' is invalid`);
+    const value = tryResolveElicitationOption(field.options, answer);
+    if (value !== undefined) {
+      return value;
     }
-    return value;
+    // The user typed freeform text that did not match any of the predefined
+    // options (e.g. the chooser UI had to fall back to a text input). Forward
+    // the raw text instead of throwing — the agent can decide what to do with
+    // an out-of-set answer, but a hard error here would leave the elicitation
+    // pending and stall the turn.
+    return answer;
   }
   return answer;
 }
 
-function resolveElicitationOption(
+function tryResolveElicitationOption(
   options: ElicitationQuestionOption[],
   answer: string,
-): ElicitationContentValue {
+): ElicitationContentValue | undefined {
   const normalized = normalizeQuestionAnswer(answer);
   const option = options.find(
     (candidate) =>
       normalizeQuestionAnswer(candidate.label) === normalized ||
       String(candidate.value).trim().toLocaleLowerCase() === normalized,
   );
-  if (!option) {
+  return option?.value;
+}
+
+function resolveElicitationOption(
+  options: ElicitationQuestionOption[],
+  answer: string,
+): ElicitationContentValue {
+  const value = tryResolveElicitationOption(options, answer);
+  if (value === undefined) {
     throw new Error(`ACP elicitation answer '${answer}' is not one of the available options`);
   }
-  return option.value;
+  return value;
 }
 
 function buildACPQuestionInput(

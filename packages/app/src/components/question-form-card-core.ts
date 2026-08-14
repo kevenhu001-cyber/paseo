@@ -127,6 +127,35 @@ export function buildQuestionFormQuestionsFromActions(
   ];
 }
 
+/**
+ * Merges parsed questions with action-derived options so a chooser request
+ * never ends up with a question that has no buttons. When a provider drops
+ * the form options while serializing the request, we keep the question's
+ * original text and headers but borrow the action labels as the choice
+ * list. Any question that already has options is left untouched.
+ */
+export function mergeQuestionsWithActionFallback(
+  parsed: QuestionFormQuestion[] | null,
+  fallback: QuestionFormQuestion[] | null,
+): QuestionFormQuestion[] | null {
+  if (!fallback) {
+    return parsed;
+  }
+  if (!parsed) {
+    return fallback;
+  }
+  return parsed.map((question, index) => {
+    if (question.options.length > 0) {
+      return question;
+    }
+    const fallbackQuestion = fallback[index] ?? fallback[0];
+    if (!fallbackQuestion || fallbackQuestion.options.length === 0) {
+      return question;
+    }
+    return { ...question, options: fallbackQuestion.options, allowOther: false };
+  });
+}
+
 export function questionShowsTextInput(question: QuestionFormQuestion): boolean {
   return question.options.length === 0 || question.allowOther;
 }

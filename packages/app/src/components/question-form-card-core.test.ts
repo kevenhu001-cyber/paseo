@@ -3,6 +3,7 @@ import {
   areQuestionsAnswered,
   buildQuestionFormQuestionsFromActions,
   buildQuestionFormAnswers,
+  mergeQuestionsWithActionFallback,
   parseQuestionFormQuestions,
   questionShowsTextInput,
   resolveDismissLabel,
@@ -172,6 +173,100 @@ describe("question form card core", () => {
     expect(areQuestionsAnswered(questions, {}, { 0: "custom" })).toBe(true);
     expect(buildQuestionFormAnswers(questions, {}, { 0: "custom" })).toEqual({
       Response: "custom",
+    });
+  });
+
+  describe("mergeQuestionsWithActionFallback", () => {
+    test("borrows action labels for a single question whose options were dropped", () => {
+      const parsed = parseQuestionFormQuestions({
+        questions: [
+          {
+            question: "Which path?",
+            header: "Path",
+            options: [],
+          },
+        ],
+      });
+      const fallback = buildQuestionFormQuestionsFromActions(
+        [
+          { behavior: "allow", label: "Narrow fix" },
+          { behavior: "allow", label: "Protocol fix" },
+          { behavior: "deny", label: "Skip" },
+        ],
+        "Which path?",
+      );
+
+      const merged = mergeQuestionsWithActionFallback(parsed, fallback);
+
+      expect(merged).toEqual([
+        {
+          question: "Which path?",
+          header: "Path",
+          options: [{ label: "Narrow fix" }, { label: "Protocol fix" }],
+          multiSelect: false,
+          allowOther: false,
+          allowEmpty: false,
+          placeholder: undefined,
+          dismissLabel: undefined,
+        },
+      ]);
+    });
+
+    test("fills optionless questions while keeping questions that already have options", () => {
+      const parsed = parseQuestionFormQuestions({
+        questions: [
+          {
+            question: "Pick one",
+            header: "Mode",
+            options: [{ label: "Default" }],
+          },
+          {
+            question: "Now pick the path",
+            header: "Path",
+            options: [],
+          },
+        ],
+      });
+      const fallback = buildQuestionFormQuestionsFromActions(
+        [
+          { behavior: "allow", label: "Narrow fix" },
+          { behavior: "allow", label: "Protocol fix" },
+        ],
+        "Now pick the path",
+      );
+
+      const merged = mergeQuestionsWithActionFallback(parsed, fallback);
+
+      expect(merged?.[0]?.options).toEqual([{ label: "Default" }]);
+      expect(merged?.[1]?.options).toEqual([{ label: "Narrow fix" }, { label: "Protocol fix" }]);
+    });
+
+    test("returns the parsed questions unchanged when the fallback has no options", () => {
+      const parsed = parseQuestionFormQuestions({
+        questions: [
+          {
+            question: "Free text",
+            header: "Response",
+            options: [],
+          },
+        ],
+      });
+      const fallback = buildQuestionFormQuestionsFromActions([], "Free text");
+
+      const merged = mergeQuestionsWithActionFallback(parsed, fallback);
+
+      expect(merged).toEqual(parsed);
+    });
+
+    test("uses the fallback outright when parsing produced nothing", () => {
+      const fallback = buildQuestionFormQuestionsFromActions(
+        [{ behavior: "allow", label: "Yes" }],
+        "Continue?",
+      );
+
+      const merged = mergeQuestionsWithActionFallback(null, fallback);
+
+      expect(merged).toEqual(fallback);
     });
   });
 });

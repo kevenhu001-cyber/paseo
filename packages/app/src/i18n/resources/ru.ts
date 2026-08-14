@@ -206,6 +206,8 @@ export const ru: TranslationResources = {
       implement: "Осуществлять",
       question: "Как бы вы хотели продолжить?",
       proposedPlan: "Предлагаемый план",
+      responseFailed:
+        "Не удалось отправить ваш ответ. Агент его не получил, и ход всё ещё ожидает.",
     },
   },
   agentPanel: {

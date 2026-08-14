@@ -206,6 +206,7 @@ export const zhCN: TranslationResources = {
       implement: "实施",
       question: "你想如何继续？",
       proposedPlan: "建议计划",
+      responseFailed: "无法发送你的回答。Agent 没有收到，当前轮次仍在等待。",
     },
   },
   agentPanel: {

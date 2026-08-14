@@ -206,6 +206,8 @@ export const ja: TranslationResources = {
       implement: "実装",
       question: "どのように続けますか？",
       proposedPlan: "提案されたプラン",
+      responseFailed:
+        "回答を送信できませんでした。エージェントは受け取っておらず、ターンは待機中です。",
     },
   },
   agentPanel: {

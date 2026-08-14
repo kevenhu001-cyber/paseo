@@ -204,6 +204,8 @@ export const en = {
       implement: "Implement",
       question: "How would you like to proceed?",
       proposedPlan: "Proposed plan",
+      responseFailed:
+        "Couldn't send your answer. The agent did not receive it and the turn is still waiting.",
     },
   },
   agentPanel: {

@@ -1240,28 +1240,110 @@ describe("ACPAgentSession Zed parity", () => {
       throw new Error("Expected permission request");
     }
 
-    await expect(
-      session.respondToPermission(requested.request.id, {
-        behavior: "allow",
-        updatedInput: {
-          ...requested.request.input,
-          answers: { Response: "Unknown option" },
-        },
-      }),
-    ).rejects.toThrow("did not select an available option");
-    expect(session.getPendingPermissions()).toHaveLength(1);
-
+    // Freeform text that does not match any predefined option must not
+    // stall the turn. The chooser falls back to the first allow option so
+    // the agent gets a response and can keep the conversation going.
     await session.respondToPermission(requested.request.id, {
       behavior: "allow",
       updatedInput: {
         ...requested.request.input,
-        answers: { Response: "Protocol fix" },
+        answers: { Response: "Unknown option" },
       },
     });
 
     await expect(permission).resolves.toEqual({
+      outcome: { outcome: "selected", optionId: "q0_opt_0" },
+    });
+
+    // Round out the test with the matching label path to keep coverage of
+    // the exact-match branch.
+    const events2: AgentStreamEvent[] = [];
+    const session2 = createSessionWithConfig({ provider: "kimi-acp" });
+    asInternals<ACPSessionInternals>(session2).sessionId = "session-1";
+    session2.subscribe((event) => events2.push(event));
+    const permission2 = session2.requestPermission({
+      sessionId: "session-1",
+      toolCall: {
+        toolCallId: "call-1",
+        title: "AskUserQuestion",
+        status: "pending",
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: "Which path should Paseo take?" },
+          },
+        ],
+      },
+      options: [
+        { optionId: "q0_opt_0", name: "Narrow fix", kind: "allow_once" },
+        { optionId: "q0_opt_1", name: "Protocol fix", kind: "allow_once" },
+        { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+      ],
+    } satisfies RequestPermissionRequest);
+    await Promise.resolve();
+    const requested2 = events2.find((event) => event.type === "permission_requested");
+    if (requested2?.type !== "permission_requested") {
+      throw new Error("Expected permission request");
+    }
+
+    await session2.respondToPermission(requested2.request.id, {
+      behavior: "allow",
+      updatedInput: {
+        ...requested2.request.input,
+        answers: { Response: "Protocol fix" },
+      },
+    });
+
+    await expect(permission2).resolves.toEqual({
       outcome: { outcome: "selected", optionId: "q0_opt_1" },
     });
+  });
+
+  test("warns and resolves to the first allow option when chooser answer does not match", async () => {
+    const session = createSessionWithConfig({ provider: "kimi-acp" });
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    const warn = vi.spyOn(session.logger, "warn");
+
+    const permission = session.requestPermission({
+      sessionId: "session-1",
+      toolCall: {
+        toolCallId: "question-1",
+        title: "AskUserQuestion",
+        status: "pending",
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: "Pick a path" },
+          },
+        ],
+      },
+      options: [
+        { optionId: "q0_opt_0", name: "Narrow fix", kind: "allow_once" },
+        { optionId: "q0_opt_1", name: "Protocol fix", kind: "allow_once" },
+        { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+      ],
+    } satisfies RequestPermissionRequest);
+    await Promise.resolve();
+
+    const pending = session.getPendingPermissions()[0];
+    if (!pending) {
+      throw new Error("Expected pending permission");
+    }
+
+    await session.respondToPermission(pending.id, {
+      behavior: "allow",
+      updatedInput: {
+        ...pending.input,
+        answers: { Response: "Type something custom" },
+      },
+    });
+
+    // The turn does not stall — the agent gets the first allow option as
+    // a fallback so it can keep going.
+    await expect(permission).resolves.toEqual({
+      outcome: { outcome: "selected", optionId: "q0_opt_0" },
+    });
+    expect(warn).toHaveBeenCalled();
   });
 
   test("renders ACP form elicitation requests and returns typed answers", async () => {
@@ -1391,22 +1473,20 @@ describe("ACPAgentSession Zed parity", () => {
       throw new Error("Expected pending elicitation");
     }
 
-    await expect(
-      session.respondToPermission(pending.id, {
-        behavior: "allow",
-        updatedInput: {
-          ...pending.input,
-          answers: { model: "unsupported" },
-        },
-      }),
-    ).rejects.toThrow("not one of the available options");
-    expect(session.getPendingPermissions()).toHaveLength(1);
-
+    // The chooser UI may have had to fall back to a freeform text input
+    // (e.g. the provider dropped the options, or the user typed a custom
+    // value). Out-of-set answers are forwarded to the agent as raw text
+    // instead of leaving the elicitation pending.
     await session.respondToPermission(pending.id, {
-      behavior: "deny",
-      message: "Dismissed by user",
+      behavior: "allow",
+      updatedInput: {
+        ...pending.input,
+        answers: { model: "unsupported" },
+      },
     });
-    await expect(elicitation).resolves.toEqual({ action: { action: "decline" } });
+    await expect(elicitation).resolves.toEqual({
+      action: { action: "accept", content: { model: "unsupported" } },
+    });
   });
 
   test("preserves ACP permission requests after invalid selected actions", async () => {

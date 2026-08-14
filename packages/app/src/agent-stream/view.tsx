@@ -54,6 +54,7 @@ import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { useSettings } from "@/hooks/use-settings";
 import type { ToastApi } from "@/components/toast-host";
+import { useToast } from "@/contexts/toast-context";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { ToolCallDetailsContent } from "@/components/tool-call-details";
@@ -1248,6 +1249,7 @@ function PermissionRequestCard({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
+  const toast = useToast();
 
   const { request } = permission;
   const isPlanRequest = request.kind === "plan";
@@ -1343,9 +1345,10 @@ function PermissionRequestCard({
         response,
       }).catch((error) => {
         console.error("[PermissionRequestCard] Failed to respond to permission:", error);
+        toast.error(t("agentStream.permission.responseFailed"));
       });
     },
-    [permission.agentId, permission.request.id, respondToPermission],
+    [permission.agentId, permission.request.id, respondToPermission, t, toast],
   );
   const handleActionPress = useCallback(
     (action: AgentPermissionAction) => {

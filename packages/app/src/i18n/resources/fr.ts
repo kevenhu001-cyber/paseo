@@ -208,6 +208,8 @@ export const fr: TranslationResources = {
       implement: "Mettre en œuvre",
       question: "Comment souhaitez-vous procéder?",
       proposedPlan: "Plan proposé",
+      responseFailed:
+        "Impossible d’envoyer votre réponse. L’agent ne l’a pas reçue et le tour attend toujours.",
     },
   },
   agentPanel: {
