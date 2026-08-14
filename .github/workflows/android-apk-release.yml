@@ -167,9 +167,9 @@ jobs:
         if: steps.expo.outputs.available != 'true'
         run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build client dependencies
+      - name: Build app dependencies
         if: steps.expo.outputs.available != 'true'
-        run: npm run build:client
+        run: npm run build:app-deps
 
       - name: Generate Android project
         if: steps.expo.outputs.available != 'true'
