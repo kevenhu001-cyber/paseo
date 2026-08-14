@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   areQuestionsAnswered,
+  buildQuestionFormQuestionsFromActions,
   buildQuestionFormAnswers,
   parseQuestionFormQuestions,
   questionShowsTextInput,
@@ -9,6 +10,62 @@ import {
 } from "./question-form-card-core";
 
 describe("question form card core", () => {
+  test("normalizes common ACP option shapes instead of dropping the question", () => {
+    const questions = parseQuestionFormQuestions({
+      questions: [
+        {
+          question: "Pick a mode",
+          header: "Mode",
+          options: [
+            "Fast",
+            { title: "Accurate", description: "More deliberate" },
+            { name: "Balanced" },
+            { const: "Custom" },
+          ],
+        },
+      ],
+    });
+
+    expect(questions).toEqual([
+      {
+        question: "Pick a mode",
+        header: "Mode",
+        options: [
+          { label: "Fast" },
+          { label: "Accurate", description: "More deliberate" },
+          { label: "Balanced", description: undefined },
+          { label: "Custom", description: undefined },
+        ],
+        multiSelect: false,
+        allowOther: false,
+        allowEmpty: false,
+        placeholder: undefined,
+        dismissLabel: undefined,
+      },
+    ]);
+  });
+
+  test("builds a visible choice form when a question payload is missing", () => {
+    expect(
+      buildQuestionFormQuestionsFromActions(
+        [
+          { behavior: "allow", label: "Continue" },
+          { behavior: "deny", label: "Cancel" },
+        ],
+        "What should happen next?",
+      ),
+    ).toEqual([
+      {
+        question: "What should happen next?",
+        header: "Response",
+        options: [{ label: "Continue" }],
+        multiSelect: false,
+        allowOther: false,
+        allowEmpty: false,
+      },
+    ]);
+  });
+
   test("treats optional input prompts as skippable empty answers", () => {
     const questions = parseQuestionFormQuestions({
       questions: [

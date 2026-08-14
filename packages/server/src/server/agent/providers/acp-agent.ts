@@ -3786,6 +3786,9 @@ function isACPChooserRequest(
   if (/(?:ask[_ -]?user|question|elicitation)/u.test(toolName)) {
     return true;
   }
+  if (options.some((option) => /^q\d+_opt_/u.test(option.optionId))) {
+    return true;
+  }
 
   const allowKinds = new Set<PermissionOption["kind"]>();
   for (const option of options) {
@@ -3894,6 +3897,29 @@ function isElicitationFieldRequired(schema: ElicitationPropertySchema): boolean 
   return false;
 }
 
+function readElicitationOptionLabel(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function mapElicitationEnumOptions(values: unknown): ElicitationQuestionOption[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values.flatMap((rawOption) => {
+    if (!isRecord(rawOption) || typeof rawOption.const !== "string") {
+      return [];
+    }
+    const value = rawOption.const;
+    const label =
+      readElicitationOptionLabel(rawOption.title) ??
+      readElicitationOptionLabel(rawOption.label) ??
+      readElicitationOptionLabel(rawOption.name) ??
+      value;
+    return [{ label, value }];
+  });
+}
+
 function getElicitationQuestionOptions(
   schema: ElicitationPropertySchema,
 ): ElicitationQuestionOption[] {
@@ -3905,16 +3931,24 @@ function getElicitationQuestionOptions(
   }
   if (schema.type === "string") {
     if (schema.oneOf?.length) {
-      return schema.oneOf.map((option) => ({ label: option.title, value: option.const }));
+      return mapElicitationEnumOptions(schema.oneOf);
     }
-    return (schema.enum ?? []).map((value) => ({ label: value, value }));
+    return (schema.enum ?? [])
+      .map((value) => readElicitationOptionLabel(value))
+      .filter((value): value is string => value !== null)
+      .map((value) => ({ label: value, value }));
   }
   if (schema.type === "array") {
-    if ("anyOf" in schema.items) {
-      return schema.items.anyOf.map((option) => ({ label: option.title, value: option.const }));
+    const rawItems: unknown = schema.items;
+    const items = isRecord(rawItems) ? rawItems : null;
+    if (items && Array.isArray(items.anyOf)) {
+      return mapElicitationEnumOptions(items.anyOf);
     }
-    if ("enum" in schema.items) {
-      return schema.items.enum.map((value) => ({ label: value, value }));
+    if (items && Array.isArray(items.enum)) {
+      return items.enum
+        .map((value) => readElicitationOptionLabel(value))
+        .filter((value): value is string => value !== null)
+        .map((value) => ({ label: value, value }));
     }
   }
   return [];

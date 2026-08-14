@@ -27,7 +27,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.checkout_ref || github.ref }}
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Checkout requested ref
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ github.event.inputs.checkout_ref || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin '+refs/heads/*:refs/remotes/origin/*'
+          if ! resolved_ref="$(git rev-parse --verify "${CHECKOUT_REF}^{commit}")"; then
+            echo "::error::Unable to resolve checkout_ref '${CHECKOUT_REF}' as a branch, tag, or commit."
+            exit 1
+          fi
+          git checkout --detach "$resolved_ref"
+          echo "Building commit $resolved_ref (requested ref: $CHECKOUT_REF)"
 
       - uses: actions/setup-node@v4
         with:

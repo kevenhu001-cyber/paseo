@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   computeNextReleaseVersion,
   getReleaseInfoFromSourceTag,
+  normalizeReleaseTag,
   parseReleaseVersion,
 } from "./release-version-utils.mjs";
 
@@ -46,6 +47,11 @@ test("emits beta release info from tags", () => {
     releaseChannel: "beta",
     isSmokeTag: false,
   });
+});
+
+test("normalizes legacy dotted beta tags used by manual release runs", () => {
+  assert.equal(normalizeReleaseTag("v0.4.0.beta.3"), "v0.4.0-beta.3");
+  assert.equal(normalizeReleaseTag("desktop-macos-v0.4.0.beta.3"), "v0.4.0-beta.3");
 });
 
 test("rejects non-beta prerelease versions", () => {

@@ -1282,7 +1282,7 @@ describe("ACPAgentSession Zed parity", () => {
           model: {
             type: "string",
             title: "Model",
-            enum: ["fast", "accurate"],
+            oneOf: [{ const: "fast" }, { const: "accurate" }],
           },
           count: { type: "integer", minimum: 1 },
           enabled: { type: "boolean" },

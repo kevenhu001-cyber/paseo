@@ -2,6 +2,8 @@ const versionPattern =
   /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<prerelease>[0-9A-Za-z.-]+))?$/;
 const sourceTagPattern =
   /^(?:(?:desktop(?:-(?:windows|linux|macos))?|android)-)?v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
+const legacyBetaTagPattern =
+  /^(?:(desktop(?:-(?:windows|linux|macos))?|android)-)?v(\d+\.\d+\.\d+)\.beta\.(\d+)$/;
 
 function assertInteger(value, label) {
   if (!Number.isInteger(value) || value < 0) {
@@ -60,10 +62,14 @@ export function formatReleaseVersion({ major, minor, patch, prerelease = null })
 
 export function normalizeReleaseTag(rawTag) {
   const trimmed = rawTag.trim().replace(/^refs\/tags\//, "");
-  const match = trimmed.match(sourceTagPattern);
+  const legacyBetaMatch = trimmed.match(legacyBetaTagPattern);
+  const normalizedTag = legacyBetaMatch
+    ? `${legacyBetaMatch[1] ? `${legacyBetaMatch[1]}-` : ""}v${legacyBetaMatch[2]}-beta.${legacyBetaMatch[3]}`
+    : trimmed;
+  const match = normalizedTag.match(sourceTagPattern);
   if (!match?.groups?.version) {
     throw new Error(
-      `Unsupported release tag "${rawTag}". Expected vX.Y.Z, vX.Y.Z-beta.N, desktop-v..., or android-v...`,
+      `Unsupported release tag "${rawTag}". Expected vX.Y.Z, vX.Y.Z-beta.N, legacy vX.Y.Z.beta.N, desktop-v..., or android-v...`,
     );
   }
   return `v${match.groups.version}`;

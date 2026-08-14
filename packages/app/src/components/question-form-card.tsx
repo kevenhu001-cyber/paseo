@@ -10,6 +10,7 @@ import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
 import { isWeb } from "@/constants/platform";
 import {
   areQuestionsAnswered,
+  buildQuestionFormQuestionsFromActions,
   buildQuestionFormAnswers,
   isQuestionAnswered,
   parseQuestionFormQuestions,
@@ -317,10 +318,39 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
-  const questions = useMemo(
-    () => parseQuestionFormQuestions(permission.request.input),
-    [permission.request.input],
-  );
+  const questions = useMemo(() => {
+    const parsed = parseQuestionFormQuestions(permission.request.input);
+    const fallback = buildQuestionFormQuestionsFromActions(
+      permission.request.actions,
+      permission.request.title ?? permission.request.name,
+    );
+    if (!fallback) {
+      return parsed;
+    }
+    if (!parsed) {
+      return fallback;
+    }
+
+    // ACP chooser requests expose the same choices as permission actions. If
+    // a provider drops the form options while serializing the request, retain
+    // those action labels so the user still has a usable choice card.
+    if (parsed.every((question) => question.options.length === 0)) {
+      const [fallbackQuestion] = fallback;
+      const [firstQuestion, ...remainingQuestions] = parsed;
+      if (fallbackQuestion && firstQuestion) {
+        return [
+          { ...firstQuestion, options: fallbackQuestion.options, allowOther: false },
+          ...remainingQuestions,
+        ];
+      }
+    }
+    return parsed;
+  }, [
+    permission.request.actions,
+    permission.request.input,
+    permission.request.name,
+    permission.request.title,
+  ]);
 
   const [selections, setSelections] = useState<Record<number, Set<number>>>({});
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});

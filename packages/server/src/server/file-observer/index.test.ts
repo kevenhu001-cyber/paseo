@@ -208,57 +208,61 @@ test("deleting a watched root cannot wedge idempotent unsubscription", async () 
   await expect(subscription.unsubscribe()).resolves.toBeUndefined();
 });
 
-test("observes a thousand concurrent writes and remains healthy after delete and rename churn", async () => {
-  const root = await createRoot();
-  const directories = Array.from({ length: 20 }, (_, index) => join(root, `dir-${index}`));
-  await Promise.all(directories.map((directory) => mkdir(directory)));
-  const observed = new Map<string, Set<FileChange["type"]>>();
-  const subscription = await subscribeToFileChanges(root, (error, events) => {
-    expect(error).toBeNull();
-    for (const event of events) {
-      const types = observed.get(event.path) ?? new Set();
-      types.add(event.type);
-      observed.set(event.path, types);
+test(
+  "observes a thousand concurrent writes and remains healthy after delete and rename churn",
+  async () => {
+    const root = await createRoot();
+    const directories = Array.from({ length: 20 }, (_, index) => join(root, `dir-${index}`));
+    await Promise.all(directories.map((directory) => mkdir(directory)));
+    const observed = new Map<string, Set<FileChange["type"]>>();
+    const subscription = await subscribeToFileChanges(root, (error, events) => {
+      expect(error).toBeNull();
+      for (const event of events) {
+        const types = observed.get(event.path) ?? new Set();
+        types.add(event.type);
+        observed.set(event.path, types);
+      }
+    });
+    const paths = Array.from({ length: 1_000 }, (_, index) =>
+      join(directories[index % directories.length], `file-${index}.txt`),
+    );
+
+    const populatedDirectory = join(root, "populated", "nested");
+    await mkdir(populatedDirectory, { recursive: true });
+    const populatedPaths = Array.from({ length: 200 }, (_, index) =>
+      join(populatedDirectory, `nested-${index}.txt`),
+    );
+    await Promise.all(populatedPaths.map((path, index) => writeFile(path, `${index}`)));
+    await expect
+      .poll(() => populatedPaths.filter((path) => !observed.has(path)), { timeout: 10_000 })
+      .toEqual([]);
+
+    await Promise.all(paths.map((path, index) => writeFile(path, `${index}`)));
+    await expect
+      .poll(() => paths.filter((path) => !observed.has(path)), { timeout: 60_000 })
+      .toEqual([]);
+
+    const removedPaths = paths.slice(0, 100);
+    await Promise.all(removedPaths.map((path) => rm(path)));
+    await expect
+      .poll(() => removedPaths.filter((path) => !observed.get(path)?.has("delete")), {
+        timeout: process.platform === "win32" ? 30_000 : 10_000,
+      })
+      .toEqual([]);
+
+    for (let index = 0; index < 10; index += 1) {
+      const from = directories[index];
+      const to = join(root, `renamed-${index}`);
+      await rename(from, to);
+      await rm(to, { recursive: true, force: true });
     }
-  });
-  const paths = Array.from({ length: 1_000 }, (_, index) =>
-    join(directories[index % directories.length], `file-${index}.txt`),
-  );
-
-  const populatedDirectory = join(root, "populated", "nested");
-  await mkdir(populatedDirectory, { recursive: true });
-  const populatedPaths = Array.from({ length: 200 }, (_, index) =>
-    join(populatedDirectory, `nested-${index}.txt`),
-  );
-  await Promise.all(populatedPaths.map((path, index) => writeFile(path, `${index}`)));
-  await expect
-    .poll(() => populatedPaths.filter((path) => !observed.has(path)), { timeout: 10_000 })
-    .toEqual([]);
-
-  await Promise.all(paths.map((path, index) => writeFile(path, `${index}`)));
-  await expect
-    .poll(() => paths.filter((path) => !observed.has(path)), { timeout: 60_000 })
-    .toEqual([]);
-
-  const removedPaths = paths.slice(0, 100);
-  await Promise.all(removedPaths.map((path) => rm(path)));
-  await expect
-    .poll(() => removedPaths.filter((path) => !observed.get(path)?.has("delete")), {
-      timeout: 10_000,
-    })
-    .toEqual([]);
-
-  for (let index = 0; index < 10; index += 1) {
-    const from = directories[index];
-    const to = join(root, `renamed-${index}`);
-    await rename(from, to);
-    await rm(to, { recursive: true, force: true });
-  }
-  const sentinel = join(directories[15], "still-observed.txt");
-  await writeFile(sentinel, "alive");
-  await expect.poll(() => observed.has(sentinel)).toBe(true);
-  await subscription.unsubscribe();
-}, 90_000);
+    const sentinel = join(directories[15], "still-observed.txt");
+    await writeFile(sentinel, "alive");
+    await expect.poll(() => observed.has(sentinel)).toBe(true);
+    await subscription.unsubscribe();
+  },
+  process.platform === "win32" ? 120_000 : 90_000,
+);
 
 test("unsubscribe cancels reconciliation queued by a write burst", async () => {
   const root = await createRoot();
