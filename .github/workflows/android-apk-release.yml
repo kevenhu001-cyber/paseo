@@ -25,6 +25,9 @@ jobs:
       contents: write
       packages: read
     runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      ONNXRUNTIME_NODE_INSTALL: skip
 
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +75,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::EXPO_TOKEN is not configured; skipping the APK build."
+            echo "::notice::EXPO_TOKEN is not configured; building the APK locally with a generated signing key."
           fi
 
       - name: Setup Node
@@ -148,6 +151,80 @@ jobs:
         run: |
           gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "${{ github.repository }}"
 
-      - name: Skip APK build
+      - name: Setup Java
         if: steps.expo.outputs.available != 'true'
-        run: echo "APK build skipped because EXPO_TOKEN is unavailable."
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Setup Android SDK
+        if: steps.expo.outputs.available != 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        if: steps.expo.outputs.available != 'true'
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build client dependencies
+        if: steps.expo.outputs.available != 'true'
+        run: npm run build:client
+
+      - name: Generate Android project
+        if: steps.expo.outputs.available != 'true'
+        working-directory: packages/app
+        run: APP_VARIANT=production npx expo prebuild --platform android --clean --non-interactive
+
+      - name: Build release APK
+        if: steps.expo.outputs.available != 'true'
+        working-directory: packages/app/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel --no-daemon --max-workers=2
+
+      - name: Generate signing key
+        id: signing
+        if: steps.expo.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          store_pass="$(openssl rand -hex 16)"
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/release.keystore" \
+            -alias paseo-release \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$store_pass" -keypass "$store_pass" \
+            -dname "CN=Paseo, OU=Mobile, O=Paseo, L=Shanghai, ST=Shanghai, C=CN" >/dev/null 2>&1
+          echo "store_pass=$store_pass" >> "$GITHUB_OUTPUT"
+          echo "keystore_path=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
+
+      - name: Sign APK
+        id: sign
+        if: steps.expo.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_name="paseo-${RELEASE_TAG}-android.apk"
+          asset_path="$RUNNER_TEMP/$asset_name"
+
+          build_tools="$ANDROID_HOME/build-tools/35.0.0"
+          unsigned="packages/app/android/app/build/outputs/apk/release/app-release.apk"
+
+          "$build_tools/apksigner" sign \
+            --ks "${{ steps.signing.outputs.keystore_path }}" \
+            --ks-pass "pass:${{ steps.signing.outputs.store_pass }}" \
+            --key-pass "pass:${{ steps.signing.outputs.store_pass }}" \
+            --ks-key-alias paseo-release \
+            --out "$asset_path" \
+            "$unsigned"
+
+          echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
+          echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload locally built APK to GitHub Release
+        if: steps.expo.outputs.available != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$RELEASE_TAG" "${{ steps.sign.outputs.asset_path }}" --clobber --repo "${{ github.repository }}"
