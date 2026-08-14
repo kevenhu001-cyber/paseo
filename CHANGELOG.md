@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 - 2026-08-14
+
+### Fixed
+
+- Fixed MiniMax Code questions stalling when the reply didn't match an available option
+
 ## 0.4.1 - 2026-08-14
 
 ### Fixed
