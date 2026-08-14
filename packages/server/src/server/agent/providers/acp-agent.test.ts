@@ -1605,6 +1605,138 @@ describe("ACPAgentSession Zed parity", () => {
     });
   });
 
+  test("shows MiniMax Code single-select options and keeps the Others input", async () => {
+    const session = createSessionWithConfig({ provider: "generic-acp" });
+    const events: AgentStreamEvent[] = [];
+
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    session.subscribe((event) => events.push(event));
+
+    // Once the questionnaire bridge serializes single-select options, the
+    // schema carries the labels as `enum` while the description keeps the
+    // freeform "Others..." hint. Both must survive into the question card.
+    const elicitation = session.extMethod("elicitation/create", {
+      sessionId: "session-1",
+      mode: "form",
+      message: "MiniMax Code needs your input",
+      requestedSchema: {
+        type: "object",
+        required: ["q1"],
+        properties: {
+          q1: {
+            type: "string",
+            title: "Which path should Paseo take?",
+            description: "Others...",
+            enum: ["Narrow fix", "Protocol fix"],
+          },
+        },
+      },
+    });
+    await Promise.resolve();
+
+    const requested = events.find((event) => event.type === "permission_requested");
+    expect(requested).toMatchObject({
+      type: "permission_requested",
+      request: {
+        kind: "question",
+        input: {
+          questions: [
+            {
+              question: "Which path should Paseo take?",
+              header: "q1",
+              options: [{ label: "Narrow fix" }, { label: "Protocol fix" }],
+              multiSelect: false,
+              allowOther: true,
+              allowEmpty: false,
+              placeholder: "Others...",
+            },
+          ],
+        },
+      },
+    });
+    if (requested?.type !== "permission_requested") {
+      throw new Error("Expected elicitation request");
+    }
+
+    // Picking a predefined option maps to the enum value.
+    await session.respondToPermission(requested.request.id, {
+      behavior: "allow",
+      updatedInput: {
+        ...requested.request.input,
+        answers: { q1: "Protocol fix" },
+      },
+    });
+    await expect(elicitation).resolves.toEqual({
+      action: {
+        action: "accept",
+        content: { q1: "Protocol fix" },
+      },
+    });
+  });
+
+  test("uses enumNames as display labels for ACP elicitation options", async () => {
+    const session = createSessionWithConfig({ provider: "generic-acp" });
+    const events: AgentStreamEvent[] = [];
+
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    session.subscribe((event) => events.push(event));
+
+    const elicitation = session.extMethod("elicitation/create", {
+      sessionId: "session-1",
+      mode: "form",
+      message: "Pick a model",
+      requestedSchema: {
+        type: "object",
+        required: ["model"],
+        properties: {
+          model: {
+            type: "string",
+            title: "Pick a model",
+            enum: ["fast", "accurate"],
+            enumNames: ["Fast", "Accurate"],
+          },
+        },
+      },
+    });
+    await Promise.resolve();
+
+    const requested = events.find((event) => event.type === "permission_requested");
+    expect(requested).toMatchObject({
+      type: "permission_requested",
+      request: {
+        kind: "question",
+        input: {
+          questions: [
+            {
+              question: "Pick a model",
+              header: "model",
+              options: [{ label: "Fast" }, { label: "Accurate" }],
+              multiSelect: false,
+              allowOther: false,
+            },
+          ],
+        },
+      },
+    });
+    if (requested?.type !== "permission_requested") {
+      throw new Error("Expected elicitation request");
+    }
+
+    await session.respondToPermission(requested.request.id, {
+      behavior: "allow",
+      updatedInput: {
+        ...requested.request.input,
+        answers: { model: "accurate" },
+      },
+    });
+    await expect(elicitation).resolves.toEqual({
+      action: {
+        action: "accept",
+        content: { model: "accurate" },
+      },
+    });
+  });
+
   test("preserves ACP permission requests after invalid selected actions", async () => {
     const session = createSessionWithConfig({ provider: "generic-acp" });
     const events: AgentStreamEvent[] = [];

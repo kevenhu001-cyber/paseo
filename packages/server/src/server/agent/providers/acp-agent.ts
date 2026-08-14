@@ -3928,7 +3928,11 @@ function mapElicitationRequest(
         label: option.label,
       })),
       multiSelect: rawProperty.type === "array",
-      allowOther: field.options.length === 0,
+      // MiniMax Code's ask_user always appends a freeform "Others..." choice
+      // and marks it via the description placeholder even when the schema also
+      // carries enum options. Keep the text input alongside the buttons so a
+      // custom answer stays available, not just for optionless fields.
+      allowOther: field.options.length === 0 || isElicitationFreeformHint(rawProperty.description),
       allowEmpty: !field.required,
       ...(placeholder !== undefined ? { placeholder } : {}),
     });
@@ -3983,6 +3987,14 @@ function readElicitationOptionLabel(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function isElicitationFreeformHint(description: string | null | undefined): boolean {
+  if (typeof description !== "string") {
+    return false;
+  }
+  const hint = description.trim().toLocaleLowerCase();
+  return hint === "others" || hint === "others..." || hint === "other" || hint === "other...";
+}
+
 function mapElicitationEnumOptions(values: unknown): ElicitationQuestionOption[] {
   if (!Array.isArray(values)) {
     return [];
@@ -4015,10 +4027,21 @@ function getElicitationQuestionOptions(
     if (schema.oneOf?.length) {
       return mapElicitationEnumOptions(schema.oneOf);
     }
-    return (schema.enum ?? [])
-      .map((value) => readElicitationOptionLabel(value))
-      .filter((value): value is string => value !== null)
-      .map((value) => ({ label: value, value }));
+    const enumValues = schema.enum ?? [];
+    const rawSchema = schema as unknown as Record<string, unknown>;
+    const enumNames = Array.isArray(rawSchema.enumNames) ? rawSchema.enumNames : [];
+    // JSON-Form style enums pair stable values with display names. When the
+    // provider sends both (MiniMax Code does once the questionnaire bridge
+    // serializes single-select options), prefer the names as labels so the
+    // user sees the actual choices instead of opaque option IDs.
+    const named = enumValues.map((value, index) => ({
+      value,
+      label: enumNames[index] ?? value,
+    }));
+    return named.flatMap(({ value, label }) => {
+      const resolved = readElicitationOptionLabel(label) ?? readElicitationOptionLabel(value);
+      return resolved ? [{ label: resolved, value }] : [];
+    });
   }
   if (schema.type === "array") {
     const rawItems: unknown = schema.items;
