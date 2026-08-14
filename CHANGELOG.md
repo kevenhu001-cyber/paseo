@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3 - 2026-08-14
+
+### Fixed
+
+- Fixed MiniMax Code ask_user custom answers not reaching the agent and the question card showing the "Others..." placeholder instead of the question
+- Fixed composer input dropping text during IME composition and paste ([#3343](https://github.com/getpaseo/paseo/pull/3343) by [@jimersylee](https://github.com/jimersylee))
+- Fixed cached timelines replaying their tail when resuming ([#3329](https://github.com/getpaseo/paseo/pull/3329))
+- Fixed desktop element selectors disappearing on loaded pages ([#3187](https://github.com/getpaseo/paseo/pull/3187) by [@dgk-dev](https://github.com/dgk-dev))
+
 ## 0.4.2 - 2026-08-14
 
 ### Fixed
