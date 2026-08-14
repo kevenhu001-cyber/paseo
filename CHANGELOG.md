@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 - 2026-08-14
+
+### Fixed
+
+- MiniMax Code and other ACP providers now reliably show selectable question options ([#2](https://github.com/kevenhu001-cyber/paseo/pull/2) by [@Linyuan-tech](https://github.com/Linyuan-tech))
+
 ## 0.4.0 - 2026-08-13
 
 ### Breaking
