@@ -1346,6 +1346,53 @@ describe("ACPAgentSession Zed parity", () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  test("cancels a chooser with no allow options instead of stranding the turn", async () => {
+    const session = createSessionWithConfig({ provider: "generic-acp" });
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    const warn = vi.spyOn(session.logger, "warn");
+
+    const permission = session.requestPermission({
+      sessionId: "session-1",
+      toolCall: {
+        toolCallId: "question-1",
+        title: "AskUserQuestion",
+        status: "pending",
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: "Type whatever you want" },
+          },
+        ],
+      },
+      options: [{ optionId: "q0_skip", name: "Cancel", kind: "reject_once" }],
+    } satisfies RequestPermissionRequest);
+    await Promise.resolve();
+
+    const pending = session.getPendingPermissions()[0];
+    if (!pending) {
+      throw new Error("Expected pending permission");
+    }
+
+    // `request_permission` cannot carry a freeform answer, so there is no
+    // allow option to select. The daemon must resolve (cancel) and drop the
+    // pending request rather than throwing and leaving the turn blocked.
+    await expect(
+      session.respondToPermission(pending.id, {
+        behavior: "allow",
+        updatedInput: {
+          ...pending.input,
+          answers: { Response: "Use the protocol fix" },
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    await expect(permission).resolves.toEqual({
+      outcome: { outcome: "cancelled" },
+    });
+    expect(session.getPendingPermissions()).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+  });
+
   test("renders ACP form elicitation requests and returns typed answers", async () => {
     const session = createSessionWithConfig({ provider: "generic-acp" });
     const events: AgentStreamEvent[] = [];
@@ -1486,6 +1533,75 @@ describe("ACPAgentSession Zed parity", () => {
     });
     await expect(elicitation).resolves.toEqual({
       action: { action: "accept", content: { model: "unsupported" } },
+    });
+  });
+
+  test("accepts MiniMax Code's freeform elicitation and forwards the custom answer", async () => {
+    const session = createSessionWithConfig({ provider: "generic-acp" });
+    const events: AgentStreamEvent[] = [];
+
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    session.subscribe((event) => events.push(event));
+
+    // MiniMax Code's ask_user questionnaire arrives over `elicitation/create`
+    // with a schema that always allows a freeform reply: even when the model
+    // supplied options, the adapter sends a plain string property whose
+    // description is the "Others..." placeholder.
+    const elicitation = session.extMethod("elicitation/create", {
+      sessionId: "session-1",
+      mode: "form",
+      message: "Which path should Paseo take?",
+      requestedSchema: {
+        type: "object",
+        required: ["step-1"],
+        properties: {
+          "step-1": {
+            type: "string",
+            title: "Which path should Paseo take?",
+            description: "Others...",
+          },
+        },
+      },
+    });
+    await Promise.resolve();
+
+    const requested = events.find((event) => event.type === "permission_requested");
+    expect(requested).toMatchObject({
+      type: "permission_requested",
+      request: {
+        kind: "question",
+        input: {
+          questions: [
+            {
+              question: "Which path should Paseo take?",
+              header: "step-1",
+              options: [],
+              multiSelect: false,
+              allowOther: true,
+              allowEmpty: false,
+              placeholder: "Others...",
+            },
+          ],
+        },
+      },
+    });
+    if (requested?.type !== "permission_requested") {
+      throw new Error("Expected elicitation request");
+    }
+
+    await session.respondToPermission(requested.request.id, {
+      behavior: "allow",
+      updatedInput: {
+        ...requested.request.input,
+        answers: { "step-1": "Use the protocol fix" },
+      },
+    });
+
+    await expect(elicitation).resolves.toEqual({
+      action: {
+        action: "accept",
+        content: { "step-1": "Use the protocol fix" },
+      },
     });
   });
 

@@ -2254,10 +2254,13 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     }
     if (pending.request.kind === "question" && response.behavior === "allow" && !selectedOption) {
       // The question had no allow_* options at all (or none survived the
-      // answer-to-option match). Surface this as a hard error so the turn
-      // does not stall; the UI turns it into a toast and the agent learns
-      // its chooser request was unanswerable.
-      throw new Error("ACP question response did not select an available option");
+      // answer-to-option match). `request_permission` cannot carry a freeform
+      // answer, so there is no option to select; hard-throwing here leaves the
+      // permission pending forever and strands the turn. Resolve as cancelled
+      // instead and log the mismatch so providers with strict chooser
+      // contracts can be investigated.
+      this.cancelUnanswerableQuestion(pending, requestId, response);
+      return;
     }
     warnIfQuestionAnswerFellBack(this.logger, pending.request, response, selectedOption);
 
@@ -2284,6 +2287,26 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     if (response.behavior === "deny" && response.interrupt && this.connection && this.sessionId) {
       await this.connection.cancel({ sessionId: this.sessionId });
     }
+  }
+
+  private cancelUnanswerableQuestion(
+    pending: PendingPermission,
+    requestId: string,
+    response: AgentPermissionResponse,
+  ): void {
+    this.logger.warn(
+      { toolCallId: pending.request.metadata?.toolCallId, requestId },
+      "ACP question response did not match any available option; cancelling the request",
+    );
+    this.pendingPermissions.delete(requestId);
+    pending.resolve({ outcome: { outcome: "cancelled" } });
+    this.pushEvent({
+      type: "permission_resolved",
+      provider: this.provider,
+      requestId,
+      resolution: response,
+      turnId: pending.turnId ?? undefined,
+    });
   }
 
   describePersistence(): AgentPersistenceHandle | null {
@@ -3888,8 +3911,18 @@ function mapElicitationRequest(
       required: required.has(key) || isElicitationFieldRequired(rawProperty),
     };
     fields.push(field);
+    let placeholder: string | undefined;
+    if (
+      rawProperty.title &&
+      rawProperty.description !== undefined &&
+      rawProperty.description !== null
+    ) {
+      placeholder = String(rawProperty.description);
+    } else if (rawProperty.default !== undefined && rawProperty.default !== null) {
+      placeholder = String(rawProperty.default);
+    }
     questions.push({
-      question: rawProperty.description ?? rawProperty.title ?? key,
+      question: rawProperty.title ?? rawProperty.description ?? key,
       header: key,
       options: field.options.map((option) => ({
         label: option.label,
@@ -3897,9 +3930,7 @@ function mapElicitationRequest(
       multiSelect: rawProperty.type === "array",
       allowOther: field.options.length === 0,
       allowEmpty: !field.required,
-      ...(rawProperty.default !== undefined && rawProperty.default !== null
-        ? { placeholder: String(rawProperty.default) }
-        : {}),
+      ...(placeholder !== undefined ? { placeholder } : {}),
     });
   }
 
