@@ -17,49 +17,114 @@ export interface QuestionFormQuestion {
 export type QuestionSelections = Record<number, ReadonlySet<number>>;
 export type QuestionOtherTexts = Record<number, string>;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readDisplayString(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value.trim().length > 0 ? value : undefined;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return undefined;
+}
+
 function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
 }
 
-export function parseQuestionFormQuestions(input: unknown): QuestionFormQuestion[] | null {
-  if (
-    typeof input !== "object" ||
-    input === null ||
-    !("questions" in input) ||
-    !Array.isArray((input as Record<string, unknown>).questions)
-  ) {
+function readFirstDisplayString(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = readDisplayString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function parseQuestionOption(value: unknown): QuestionOption | null {
+  const label = readDisplayString(value);
+  if (label) {
+    return { label };
+  }
+  if (!isRecord(value)) {
     return null;
   }
-  const raw = (input as Record<string, unknown>).questions as unknown[];
+
+  const optionLabel = readFirstDisplayString(value, ["label", "title", "name", "value", "const"]);
+  if (!optionLabel) {
+    return null;
+  }
+  return {
+    label: optionLabel,
+    description: readOptionalString(value, "description"),
+  };
+}
+
+export function parseQuestionFormQuestions(input: unknown): QuestionFormQuestion[] | null {
+  if (!isRecord(input) || !Array.isArray(input.questions)) {
+    return null;
+  }
+  const raw = input.questions;
   const questions: QuestionFormQuestion[] = [];
   for (const item of raw) {
-    if (typeof item !== "object" || item === null) return null;
-    const q = item as Record<string, unknown>;
-    if (typeof q.question !== "string" || typeof q.header !== "string") return null;
-    if (!Array.isArray(q.options)) return null;
-    const options: QuestionOption[] = [];
-    for (const opt of q.options as unknown[]) {
-      if (typeof opt !== "object" || opt === null) return null;
-      const o = opt as Record<string, unknown>;
-      if (typeof o.label !== "string") return null;
-      options.push({
-        label: o.label,
-        description: typeof o.description === "string" ? o.description : undefined,
-      });
+    if (!isRecord(item)) {
+      continue;
     }
+
+    const question = readFirstDisplayString(item, ["question", "prompt", "text", "title"]);
+    if (!question) {
+      continue;
+    }
+    const header = readFirstDisplayString(item, ["header", "name", "id"]) ?? question;
+    const options = Array.isArray(item.options)
+      ? item.options
+          .map((option) => parseQuestionOption(option))
+          .filter((option): option is QuestionOption => option !== null)
+      : [];
+
     questions.push({
-      question: q.question,
-      header: q.header,
+      question,
+      header,
       options,
-      multiSelect: q.multiSelect === true,
-      allowOther: q.allowOther === true || q.isOther === true,
-      allowEmpty: q.allowEmpty === true,
-      placeholder: readOptionalString(q, "placeholder"),
-      dismissLabel: readOptionalString(q, "dismissLabel"),
+      multiSelect: item.multiSelect === true || item.multiple === true,
+      allowOther: item.allowOther === true || item.isOther === true || item.allow_other === true,
+      allowEmpty: item.allowEmpty === true || item.optional === true,
+      placeholder: readOptionalString(item, "placeholder"),
+      dismissLabel: readOptionalString(item, "dismissLabel"),
     });
   }
   return questions.length > 0 ? questions : null;
+}
+
+export function buildQuestionFormQuestionsFromActions(
+  actions: readonly { behavior?: string; label?: string }[] | undefined,
+  question = "Choose an option",
+): QuestionFormQuestion[] | null {
+  const options = (actions ?? [])
+    .filter((action) => action.behavior === "allow" && typeof action.label === "string")
+    .map((action) => ({ label: action.label?.trim() ?? "" }))
+    .filter((option) => option.label.length > 0);
+  if (options.length === 0) {
+    return null;
+  }
+  return [
+    {
+      question,
+      header: "Response",
+      options,
+      multiSelect: false,
+      allowOther: false,
+      allowEmpty: false,
+    },
+  ];
 }
 
 export function questionShowsTextInput(question: QuestionFormQuestion): boolean {

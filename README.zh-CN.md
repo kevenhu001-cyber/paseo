@@ -11,6 +11,9 @@
   <a href="README.ko.md">한국어</a>
 </p>
 
+> [!NOTE]
+> 这是 Paseo 的修改版（Fork），已接入 MiniMax Code。该版本在原项目基础上增加了 MiniMax Code（`mcode`）ACP provider、provider 发现、模型选择和交互式询问支持。
+
 <p align="center">
   <a href="https://github.com/getpaseo/paseo/stargazers">
     <img src="https://img.shields.io/github/stars/getpaseo/paseo?style=flat&logo=github" alt="GitHub stars">
@@ -29,7 +32,7 @@
   </a>
 </p>
 
-<p align="center">Claude Code、Codex、Copilot、OpenCode 和 Pi agents 的统一界面。</p>
+<p align="center">Claude Code、Codex、Copilot、OpenCode、Pi 和 MiniMax Code agents 的统一界面。</p>
 
 <p align="center">
   <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
@@ -48,7 +51,7 @@
 在你自己的机器上并行运行 agents。无论在手机上还是桌前，都能推进交付。
 
 - **自托管：** Agents 在你的机器上运行，使用完整的本地开发环境、工具、配置和技能。
-- **多提供商：** 通过同一个界面使用 Claude Code、Codex、Copilot、OpenCode 和 Pi。为每个任务选择合适的模型。
+- **多提供商：** 通过同一个界面使用 Claude Code、Codex、Copilot、OpenCode、Pi 和 MiniMax Code。为每个任务选择合适的模型。
 - **语音控制：** 在语音模式下口述任务或讨论问题。需要免手操作时很方便。
 - **跨设备：** 支持 iOS、Android、桌面端、Web 和 CLI。在桌前开始工作，用手机查看进度，也可以从终端脚本化操作。
 - **隐私优先：** Paseo 没有遥测、追踪，也不会强制登录。
@@ -66,6 +69,7 @@ Paseo 会运行一个名为 daemon 的本地服务，用来管理你的 coding a
 - [GitHub Copilot](https://github.com/features/copilot/cli/)
 - [OpenCode](https://github.com/anomalyco/opencode)
 - [Pi](https://pi.dev)
+- [MiniMax Code](https://agent.minimaxi.com/download)
 
 ### 桌面 app（推荐）
 

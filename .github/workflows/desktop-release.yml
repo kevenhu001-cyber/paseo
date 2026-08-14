@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build (e.g. v0.1.0)"
+        description: "Tag to build: vX.Y.Z or vX.Y.Z-beta.N (legacy .beta.N is accepted)"
         required: true
         type: string
       platform:
@@ -164,6 +164,15 @@ jobs:
           build_args=(-- --publish never --mac --${{ matrix.electron_arch }})
           build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
           build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          if [[ -z "${CSC_LINK:-}" || -z "${CSC_KEY_PASSWORD:-}" ]]; then
+            echo "::notice::Apple signing secrets are not configured; building an unsigned macOS artifact."
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            build_args+=("-c.mac.identity=null")
+          fi
+          if [[ -z "${APPLE_ID:-}" || -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" || -z "${APPLE_TEAM_ID:-}" ]]; then
+            echo "::notice::Apple notarization secrets are not configured; skipping notarization."
+            build_args+=("-c.mac.notarize=false")
+          fi
           npm run build:desktop "${build_args[@]}"
 
       - name: Upload packaged smoke diagnostics

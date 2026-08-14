@@ -18,14 +18,29 @@ on:
       - ".github/workflows/nix-update-hash.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   update-hash:
     runs-on: ubuntu-latest
     steps:
+      - name: Select update token
+        id: auth
+        shell: bash
+        env:
+          PASEO_BOT_APP_ID: ${{ secrets.PASEO_BOT_APP_ID }}
+          PASEO_BOT_APP_PRIVATE_KEY: ${{ secrets.PASEO_BOT_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$PASEO_BOT_APP_ID" && -n "$PASEO_BOT_APP_PRIVATE_KEY" ]]; then
+            echo "use_app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_app=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PASEO_BOT_APP_* secrets are not configured; using GITHUB_TOKEN."
+          fi
+
       - uses: actions/create-github-app-token@v1
         id: app-token
+        if: steps.auth.outputs.use_app == 'true'
         with:
           app-id: ${{ secrets.PASEO_BOT_APP_ID }}
           private-key: ${{ secrets.PASEO_BOT_APP_PRIVATE_KEY }}
@@ -33,7 +48,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: actions/setup-node@v4
         with:
