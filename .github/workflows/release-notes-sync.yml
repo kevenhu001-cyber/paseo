@@ -65,3 +65,17 @@ jobs:
           fi
 
           node scripts/sync-release-notes-from-changelog.mjs "${args[@]}"
+
+      - name: Attach install scripts
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in scripts/install.sh scripts/install.ps1; do
+            if [ -f "$script" ]; then
+              gh release upload "${{ github.ref_name }}" "$script" --clobber --repo "$REPO"
+            fi
+          done
