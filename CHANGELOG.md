@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.4-beta.1 - 2026-08-15
+
+### Added
+
+- Added managed local plugin lifecycle: create, install, reload, disable, and remove trusted local plugins from Settings and the `paseo plugin` CLI ([#3222](https://github.com/getpaseo/paseo/pull/3222))
+- Added the track's bulk archive action covering finished managed subagents, with progress and retry ([#3368](https://github.com/getpaseo/paseo/pull/3368))
+- Added one-line install scripts for Windows and Linux ([74ee413c2](https://github.com/kevenhu001-cyber/paseo/commit/74ee413c2))
+
+### Fixed
+
+- Fixed MiniMax Code ask_user single-select questions not showing option buttons ([ff5f3957b](https://github.com/kevenhu001-cyber/paseo/commit/ff5f3957b))
+
 ## 0.4.3 - 2026-08-14
 
 ### Fixed
