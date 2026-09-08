@@ -13,6 +13,7 @@ import {
 } from "@/provider-selection/provider-selection";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 import { OptimisticFormPreferences } from "@/create-agent-preferences/optimistic-preferences";
+import { createPreferenceWriteCoalescer } from "@/create-agent-preferences/preference-write-coalescer";
 import { applyAgentProfilePreferences } from "@/create-agent-preferences/preferences";
 import { useProvidersSnapshot } from "./use-providers-snapshot";
 import {
@@ -171,46 +172,29 @@ export function useAgentFormState(options: UseAgentFormStateOptions): UseAgentFo
     [updatePreferences],
   );
 
-  // Coalesce rapid model/mode switches into one persisted write to avoid
-  // repeated JSON.stringify + Zod + AsyncStorage flushes blocking the JS thread.
-  const pendingPreferenceUpdateRef = useRef<{
-    timer: ReturnType<typeof setTimeout> | null;
-    queued: Array<Partial<FormPreferences> | ((current: FormPreferences) => FormPreferences)>;
-  }>({ timer: null, queued: [] });
+  const preferenceWriteCoalescer = useMemo(
+    () =>
+      createPreferenceWriteCoalescer({
+        delayMs: 250,
+        persist: (update) => updateCurrentPreferences(update),
+        onError: (error) => {
+          // Preserve diagnostics: validation/storage failures are expected to be rare,
+          // but losing a preference update is silent and hard to debug.
+          console.warn("[useAgentFormState] debounced preference persist failed", error);
+        },
+      }),
+    [updateCurrentPreferences],
+  );
 
   const flushPendingPreferenceUpdates = useCallback(() => {
-    const queued = pendingPreferenceUpdateRef.current.queued;
-    if (queued.length === 0) return;
-    pendingPreferenceUpdateRef.current.queued = [];
-    const toPersist: (current: FormPreferences) => FormPreferences = (current) => {
-      let next = current;
-      for (const u of queued) {
-        next =
-          typeof u === "function"
-            ? (u as (c: FormPreferences) => FormPreferences)(next)
-            : ({ ...next, ...u } as FormPreferences);
-      }
-      return next;
-    };
-    void updateCurrentPreferences(toPersist).catch((error) => {
-      // Preserve diagnostics: validation/storage failures are expected to be rare,
-      // but losing a preference update is silent and hard to debug.
-      console.warn("[useAgentFormState] debounced preference persist failed", error);
-    });
-  }, [updateCurrentPreferences]);
+    preferenceWriteCoalescer.flush();
+  }, [preferenceWriteCoalescer]);
 
   const schedulePreferenceUpdate = useCallback(
     (updates: Partial<FormPreferences> | ((current: FormPreferences) => FormPreferences)) => {
-      pendingPreferenceUpdateRef.current.queued.push(updates);
-      if (pendingPreferenceUpdateRef.current.timer) {
-        clearTimeout(pendingPreferenceUpdateRef.current.timer);
-      }
-      pendingPreferenceUpdateRef.current.timer = setTimeout(() => {
-        pendingPreferenceUpdateRef.current.timer = null;
-        flushPendingPreferenceUpdates();
-      }, 250);
+      preferenceWriteCoalescer.schedule(updates);
     },
-    [flushPendingPreferenceUpdates],
+    [preferenceWriteCoalescer],
   );
 
   const [{ form: formState, userModified, resolution }, dispatch] = useReducer(resolveAgentForm, {
@@ -478,14 +462,6 @@ export function useAgentFormState(options: UseAgentFormStateOptions): UseAgentFo
 
   useEffect(() => {
     return () => {
-      // oxlint-disable-next-line eslint-plugin-react-hooks/exhaustive-deps
-      const pending = pendingPreferenceUpdateRef.current;
-      if (pending.timer) {
-        clearTimeout(pending.timer);
-        pending.timer = null;
-      }
-      // Reuse the same flush logic to avoid drift between the two paths;
-      // flushPendingPreferenceUpdates preserves diagnostics for unexpected failures.
       flushPendingPreferenceUpdates();
     };
   }, [flushPendingPreferenceUpdates]);

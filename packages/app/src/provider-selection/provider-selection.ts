@@ -243,7 +243,7 @@ export function scoreModelRow(row: ProviderSelectionModelRow, normalizedQuery: s
   return scoreTextFields(normalizedQuery, getModelRowSearchFields(row));
 }
 
-const MAX_MODEL_SEARCH_RESULTS = 200;
+export const MAX_MODEL_SEARCH_RESULTS = 200;
 
 export function filterAndRankModelRows(
   rows: ProviderSelectionModelRow[],

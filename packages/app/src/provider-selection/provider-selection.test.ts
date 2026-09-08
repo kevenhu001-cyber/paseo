@@ -11,6 +11,7 @@ import {
   matchesModelSearch,
   resolveSelectedModelLabel,
   resolveSubmissionReadiness,
+  MAX_MODEL_SEARCH_RESULTS,
 } from "./provider-selection";
 
 describe("combined model selector data", () => {
@@ -241,6 +242,72 @@ describe("combined model selector data", () => {
     ];
 
     expect(filterAndRankModelRows(rows, "gpt54").map((row) => row.modelId)).toEqual(["gpt-5.4"]);
+  });
+
+  it("orders equal-score matches by codepoint so ranking is stable on Hermes", () => {
+    const rows = [
+      {
+        favoriteKey: "codex:apple",
+        provider: "codex",
+        providerLabel: "Codex",
+        modelId: "apple",
+        modelLabel: "apple",
+        description: "apple",
+      },
+      {
+        favoriteKey: "codex:zulu",
+        provider: "codex",
+        providerLabel: "Codex",
+        modelId: "zulu",
+        modelLabel: "Zulu",
+        description: "zulu",
+      },
+    ];
+
+    expect(filterAndRankModelRows(rows, "codex").map((row) => row.modelId)).toEqual([
+      "zulu",
+      "apple",
+    ]);
+  });
+
+  it("caps ranked results at the render budget after ranking, not before", () => {
+    const rows = Array.from({ length: MAX_MODEL_SEARCH_RESULTS + 50 }, (_, index) => {
+      const padded = String(index).padStart(3, "0");
+      return {
+        favoriteKey: `codex:m-${padded}`,
+        provider: "codex",
+        providerLabel: "Codex",
+        modelId: `m-${padded}`,
+        modelLabel: `Model ${padded}`,
+        description: `m-${padded}`,
+      };
+    }).reverse();
+
+    const ranked = filterAndRankModelRows(rows, "codex");
+
+    expect(ranked).toHaveLength(MAX_MODEL_SEARCH_RESULTS);
+    expect(ranked.map((row) => row.modelId)).toEqual(
+      Array.from({ length: MAX_MODEL_SEARCH_RESULTS }, (_, index) => {
+        const padded = String(index).padStart(3, "0");
+        return `m-${padded}`;
+      }),
+    );
+  });
+
+  it("returns every ranked result when matches fit inside the render budget", () => {
+    const rows = Array.from({ length: MAX_MODEL_SEARCH_RESULTS }, (_, index) => {
+      const padded = String(index).padStart(3, "0");
+      return {
+        favoriteKey: `codex:m-${padded}`,
+        provider: "codex",
+        providerLabel: "Codex",
+        modelId: `m-${padded}`,
+        modelLabel: `Model ${padded}`,
+        description: `m-${padded}`,
+      };
+    });
+
+    expect(filterAndRankModelRows(rows, "codex")).toHaveLength(MAX_MODEL_SEARCH_RESULTS);
   });
 
   it("keeps the selected trigger label model-only", () => {
