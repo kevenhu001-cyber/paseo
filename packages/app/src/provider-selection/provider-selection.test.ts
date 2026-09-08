@@ -281,7 +281,7 @@ describe("combined model selector data", () => {
         modelLabel: `Model ${padded}`,
         description: `m-${padded}`,
       };
-    }).reverse();
+    }).toReversed();
 
     const ranked = filterAndRankModelRows(rows, "codex");
 
