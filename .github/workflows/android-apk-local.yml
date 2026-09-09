@@ -1,0 +1,215 @@
+name: Android APK (local Gradle)
+
+# Local Gradle Release build on the GitHub-hosted runner — no EAS, nothing runs
+# on a dev machine. Pushes and pull requests produce a smoke APK artifact.
+# Tag pushes (`v*`, `android-v*`) additionally upload a `-local` APK asset to
+# the GitHub Release alongside the EAS-built APK (distinct file name, no clash).
+#
+# Release signing uses the fixed keystore stored in repository secrets so every
+# build shares one signature and installs as an upgrade:
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+#   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# Branch/PR builds without secrets fall back to an ephemeral test key and stay
+# artifact-only; tag builds fail fast when secrets are missing. See
+# docs/android.md for setup.
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+      - "android-v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild (e.g. android-v0.8.0); empty builds the selected ref as artifact-only"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: android-apk-local-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' && github.event.inputs.tag || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  SOURCE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+  IS_TAG_BUILD: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '') }}
+
+jobs:
+  build-local-apk:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' && github.event.inputs.tag || '' }}
+
+      - name: Resolve release tag
+        if: ${{ env.IS_TAG_BUILD == 'true' }}
+        shell: bash
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses > /dev/null || true
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+
+      - name: Prepare release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/paseo-release.keystore"
+            echo "Using fixed release keystore from secrets."
+          elif [ "$IS_TAG_BUILD" == "true" ]; then
+            echo "::error::Tag builds require the fixed release keystore secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). See docs/android.md."
+            exit 1
+          else
+            echo "No release keystore secrets; generating an ephemeral test key (artifact-only, reinstall needs uninstall)."
+            keytool -genkeypair -keystore "$RUNNER_TEMP/paseo-release.keystore" \
+              -alias paseo-local -keyalg RSA -keysize 2048 -validity 3650 \
+              -storepass paseo-local -keypass paseo-local \
+              -dname "CN=Paseo Local, OU=Mobile, O=Paseo, L=Unknown, ST=Unknown, C=US"
+            echo "PASEO_EPHEMERAL_KEYSTORE=1" >> "$GITHUB_ENV"
+            ANDROID_KEYSTORE_PASSWORD="paseo-local"
+            ANDROID_KEY_ALIAS="paseo-local"
+            ANDROID_KEY_PASSWORD="paseo-local"
+          fi
+
+          {
+            echo "PASEO_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/paseo-release.keystore"
+            echo "PASEO_ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
+            echo "PASEO_ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
+            echo "PASEO_ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build app dependencies
+        run: npm run build:app-deps
+
+      - name: Build terminal webview
+        run: npm run build:terminal-webview --workspace=@getpaseo/app
+
+      - name: Expo prebuild (production)
+        working-directory: packages/app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VARIANT=production npx expo prebuild --platform android --clean --non-interactive
+          grep -q "Paseo release signing" android/app/build.gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: packages/app/android
+
+      - name: Assemble Release APK
+        working-directory: packages/app/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew assembleRelease --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1024m"
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$PWD/packages/app/android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$apk"
+          ls -la "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" | head -12
+          if [ "${PASEO_EPHEMERAL_KEYSTORE:-0}" == "1" ]; then
+            echo "::warning::APK signed with an ephemeral test key; uninstall the previous build before installing."
+          fi
+
+      - name: Stage APK artifact
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$PWD/packages/app/android/app/build/outputs/apk/release/app-release.apk"
+          if [ "$IS_TAG_BUILD" == "true" ]; then
+            asset_name="paseo-${RELEASE_TAG}-local-android.apk"
+          else
+            asset_name="paseo-local-android-${GITHUB_SHA::8}.apk"
+          fi
+          cp "$src" "$RUNNER_TEMP/$asset_name"
+          echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
+          echo "asset_path=$RUNNER_TEMP/$asset_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.asset_name }}
+          path: ${{ steps.stage.outputs.asset_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Ensure GitHub release exists
+        if: ${{ env.IS_TAG_BUILD == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if node scripts/github-release.mjs --repo "${{ github.repository }}" --tag "$RELEASE_TAG" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          release_args=(
+            release create "$RELEASE_TAG"
+            --repo "${{ github.repository }}"
+            --title "Paseo $RELEASE_TAG"
+            --notes ""
+            --draft
+          )
+
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          if ! gh "${release_args[@]}"; then
+            echo "Release creation raced with another workflow; continuing."
+            node scripts/github-release.mjs --repo "${{ github.repository }}" --tag "$RELEASE_TAG" >/dev/null
+          fi
+
+      - name: Upload APK to GitHub Release
+        if: ${{ env.IS_TAG_BUILD == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_lookup="$(node scripts/github-release.mjs --repo "${{ github.repository }}" --tag "$RELEASE_TAG")"
+          gh release upload "$release_lookup" "${{ steps.stage.outputs.asset_path }}" --clobber --repo "${{ github.repository }}"

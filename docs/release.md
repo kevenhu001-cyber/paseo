@@ -112,7 +112,7 @@ npm run release:patch
 npm run release:minor
 ```
 
-This bumps the version across all workspaces, runs checks, publishes to npm, and pushes the branch + tag. The tag push triggers `Desktop Release`, `Android APK Release`, `Docker`, and `Release Notes Sync` on GitHub Actions. The workflows create the GitHub Release as a draft while builds and release-note sync run. EAS picks up the same tag via the EAS GitHub app and starts the iOS + Android store builds in parallel (see "Mobile builds (EAS)" below) — there is no mobile-release workflow under `.github/workflows`.
+This bumps the version across all workspaces, runs checks, publishes to npm, and pushes the branch + tag. The tag push triggers `Desktop Release`, `Android APK Release`, `Android APK (local Gradle)`, `Docker`, and `Release Notes Sync` on GitHub Actions. The workflows create the GitHub Release as a draft while builds and release-note sync run. EAS picks up the same tag via the EAS GitHub app and starts the iOS + Android store builds in parallel (see "Mobile builds (EAS)" below) — there is no mobile-release workflow under `.github/workflows`.
 
 After the stable release succeeds, move npm's `beta` pointer to the new stable
 version for every published package. This changes dist-tags only; do not
@@ -275,7 +275,7 @@ iOS and Android store builds are not in `.github/workflows`. They are triggered 
 
 - **Android (Play Store)** — EAS builds with profile `production` and auto-submits to the Play Store via `eas submit` (EAS-managed credentials, no Fastlane).
 - **iOS (TestFlight + App Store)** — EAS builds with profile `production`, uploads to TestFlight, and a Fastlane lane submits the build for App Store review.
-- **Android APK (GitHub Release asset)** — separate, via `.github/workflows/android-apk-release.yml`. This is the only Android-related workflow that lives in this repo.
+- **Android APK (GitHub Release asset)** — two workflows, both in this repo: `.github/workflows/android-apk-release.yml` builds on EAS, `.github/workflows/android-apk-local.yml` builds with runner-local Gradle and uploads a distinct `paseo-<tag>-local-android.apk` alongside the EAS asset.
 
 EAS uses the local app version source. `packages/app/app.config.js` derives the native version from the package version. Android `versionCode` is `major * 1_000_000 + minor * 1_000 + patch`. iOS reserves 1,000 build slots per app version: beta `N` uses slot `N`, and stable uses slot `999`. For example, `0.2.6-beta.2` appears in App Store Connect as version `0.2.6` build `2006002`; stable uses build `2006999`. Rebuilding the same tag produces the same native build number; if a store has already accepted a binary and you need a different binary, cut the next beta or patch instead of relying on EAS remote auto-increment.
 

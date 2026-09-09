@@ -193,13 +193,45 @@ adb exec-out screencap -p > screenshot.png
 Stable tag pushes like `v0.1.0` trigger:
 
 - The EAS GitHub app on Expo servers (iOS + Android production builds + store submit). There is no workflow file in this repo for it.
-- `.github/workflows/android-apk-release.yml` on GitHub Actions (APK asset on GitHub Release).
+- `.github/workflows/android-apk-release.yml` on GitHub Actions (EAS-built APK asset on GitHub Release).
+- `.github/workflows/android-apk-local.yml` on GitHub Actions (runner-local Gradle Release APK, `paseo-<tag>-local-android.apk` on the same GitHub Release, distinct file name so both assets coexist).
 
 iOS auto-submits to App Store review via a Fastlane lane after EAS uploads to TestFlight. Android auto-submits to the Play Store via EAS-managed credentials.
 
 Beta tags like `v0.1.1-beta.1` only trigger the GitHub APK workflow. They publish a GitHub prerelease APK for testing and do not submit to the stores.
 
-`android-v*` tags also trigger only the GitHub APK workflow — useful when you want to ship an APK without going through stores. The GitHub APK workflow supports `workflow_dispatch` with an existing `tag` input so you can rebuild without cutting a new tag.
+`android-v*` tags also trigger only the GitHub APK workflows — useful when you want to ship an APK without going through stores. The GitHub APK workflows support `workflow_dispatch` with an existing `tag` input so you can rebuild without cutting a new tag.
+
+## Local Gradle APK on GitHub Actions (no EAS)
+
+`.github/workflows/android-apk-local.yml` runs `expo prebuild` + `./gradlew assembleRelease` on the GitHub-hosted runner. Nothing in this flow runs on your machine. It builds the `production` variant in Release mode and signs it with your fixed keystore.
+
+Pushes to `main` and pull requests build a smoke APK and keep it as a workflow artifact for 14 days. Tag pushes (`v*`, `android-v*`) additionally upload `paseo-<tag>-local-android.apk` to the GitHub Release. `workflow_dispatch` with a `tag` input rebuilds that tag into its Release; without it, the selected ref builds artifact-only.
+
+### Release signing setup
+
+The workflow reads the keystore from repository secrets. Configure them once per repo:
+
+```bash
+gh secret set ANDROID_KEYSTORE_BASE64 --body "$(base64 -w0 paseo-release.keystore)"
+gh secret set ANDROID_KEYSTORE_PASSWORD
+gh secret set ANDROID_KEY_ALIAS
+gh secret set ANDROID_KEY_PASSWORD
+```
+
+Generate the keystore with a 30-year validity so installed apps keep accepting upgrades signed by the same key:
+
+```bash
+keytool -genkeypair -keystore paseo-release.keystore -alias paseo-release \
+  -keyalg RSA -keysize 2048 -validity 10950 \
+  -dname "CN=Paseo, OU=Mobile, O=Paseo, L=Unknown, ST=Unknown, C=US"
+```
+
+Back up the keystore file and its passwords outside the repo. Losing them forces every user to uninstall before installing newer builds, because Android rejects upgrades with a different signature. This key signs test and self-distributed builds only; it never touches Play Store credentials, which stay EAS-managed.
+
+`packages/app/plugins/with-android-release-signing.js` wires the keystore into the generated Gradle project. It appends a `paseoRelease` signing config that reads `PASEO_ANDROID_KEYSTORE_*` from the environment at Gradle execution time, so no secret lands in the generated `android/` directory (which stays gitignored). When the path variable is unset, local `npm run android:production` builds keep their existing behavior.
+
+Branch and PR builds without secrets fall back to an ephemeral test key and stay artifact-only. Tag builds fail fast when the secrets are missing, so a Release asset always carries the fixed signature.
 
 ### Useful commands
 
