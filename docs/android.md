@@ -206,7 +206,7 @@ Beta tags like `v0.1.1-beta.1` only trigger the GitHub APK workflow. They publis
 
 `.github/workflows/android-apk-local.yml` runs `expo prebuild` + `./gradlew assembleRelease` on the GitHub-hosted runner. Nothing in this flow runs on your machine. It builds the `production` variant in Release mode and signs it with your fixed keystore.
 
-Pushes to `main` and pull requests build a smoke APK and keep it as a workflow artifact for 14 days. Tag pushes (`v*`, `android-v*`) additionally upload `paseo-<tag>-local-android.apk` to the GitHub Release. `workflow_dispatch` with a `tag` input rebuilds that tag into its Release; without it, the selected ref builds artifact-only. The workflow reclaims unused runner toolchains first and checks free disk before assembling: a 4-ABI Release build exhausts the default hosted-runner disk and the runner shuts down mid-build without that step.
+Pushes to `main` and pull requests build a smoke APK and keep it as a workflow artifact for 14 days. Tag pushes (`v*`, `android-v*`) additionally upload `paseo-<tag>-local-android.apk` to the GitHub Release. `workflow_dispatch` with a `tag` input rebuilds that tag into its Release; without it, the selected ref builds artifact-only. The workflow reclaims unused runner toolchains first and checks free disk before assembling. It also caps the Gradle daemon heap for the 7 GB hosted runner: Expo's `gradle-jvmargs` plugin sizes the daemon for a dev machine, and next to it hermesc compiling the full bundle OOMs the host, which shuts the runner down right after the JS bundle is written.
 
 ### Release signing setup
 
