@@ -42,13 +42,34 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' && github.event.inputs.tag || '' }}
+
+      # A 4-ABI Release build (monorepo node_modules + SDK + Gradle outputs)
+      # exhausts the ~14 GB free on the hosted runner and the runner agent
+      # shuts itself down mid-build ("received a shutdown signal"). Reclaim
+      # toolchains this build never touches before spending any disk.
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- before ---"
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /opt/hostedtoolcache/node
+          sudo rm -rf /usr/local/lib/android/sdk/system-images
+          sudo rm -rf /usr/share/swift
+          docker system prune -af --volumes > /dev/null 2>&1 || true
+          sudo apt-get clean
+          echo "--- after ---"
+          df -h / | tail -1
 
       - name: Resolve release tag
         if: ${{ env.IS_TAG_BUILD == 'true' }}
@@ -139,6 +160,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          df -h / | tail -1
+          free_gb="$(df --output=avail -BG / | tail -1 | tr -dc '0-9')"
+          if [ "$free_gb" -lt 10 ]; then
+            echo "::error::Only ${free_gb} GB free before assembleRelease; the 4-ABI Release build needs headroom. Failing early instead of mid-build."
+            exit 1
+          fi
           ./gradlew assembleRelease --no-daemon --max-workers=2 \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1024m"
 
