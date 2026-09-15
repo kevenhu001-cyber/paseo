@@ -5,7 +5,7 @@ import type { Logger } from "pino";
 import pino from "pino";
 import { describe, expect, it } from "vitest";
 
-import type { AgentSession, AgentStreamEvent } from "../agent-sdk-types.js";
+import type { AgentSession, AgentStreamEvent } from "../../agent-sdk-types.js";
 import { AntigravityAgentClient, mapAgyToolDetail, resolveAntigravityCommand } from "./agent.js";
 import type { AntigravityProcessLaunch } from "./process.js";
 import { parseAgyEvent, parseAgyModelsOutput } from "./stream-protocol.js";

@@ -21,6 +21,7 @@ import {
 
 const tempDirs: string[] = [];
 const CONTROLLED_PROVIDERS = {
+  antigravity: { enabled: false },
   claude: { enabled: false },
   codex: { enabled: true },
   copilot: { enabled: false },

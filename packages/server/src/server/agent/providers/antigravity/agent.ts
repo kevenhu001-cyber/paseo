@@ -32,26 +32,26 @@ import type {
   ProviderCatalog,
   ProviderRefreshContext,
   ToolCallDetail,
-} from "../agent-sdk-types.js";
-import { renderPromptAttachmentAsText } from "../../prompt-attachments.js";
-import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
+} from "../../agent-sdk-types.js";
+import { renderPromptAttachmentAsText } from "../../../prompt-attachments.js";
+import { runProviderRefreshActivity } from "../../../provider-refresh-deadline.js";
 import {
   checkProviderLaunchAvailable,
   createProviderEnv,
   resolveProviderLaunch,
   type ProviderRuntimeSettings,
   type ResolvedProviderLaunch,
-} from "../../provider-launch-config.js";
-import { composeSystemPromptParts } from "../../system-prompt.js";
+} from "../../../provider-launch-config.js";
+import { composeSystemPromptParts } from "../../../system-prompt.js";
 import {
   buildBinaryDiagnosticRows,
   buildCommandResolutionDiagnosticRows,
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   toDiagnosticErrorMessage,
-} from "../diagnostic-utils.js";
-import { materializeProviderImage } from "../provider-image-output.js";
-import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "../provider-runner.js";
+} from "../../diagnostic-utils.js";
+import { materializeProviderImage } from "../../provider-image-output.js";
+import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "../../provider-runner.js";
 import {
   AGY_EFFORT_OPTIONS,
   isAgyTurnCanceled,
@@ -605,26 +605,7 @@ export class AntigravityAgentSession implements AgentSession {
     event: Extract<ReturnType<typeof parseAgyEvent>, { kind: "step_update" }>,
   ): void {
     if (event.subagentInfo?.subagents?.length) {
-      const log = event.subagentInfo.subagents
-        .map((subagent) => {
-          const name = subagent.role ?? subagent.type_name ?? "subagent";
-          const id = subagent.conversation_id ?? subagent.log_uri ?? "";
-          return id ? `${name}: ${id}` : name;
-        })
-        .join("\n");
-      this.emit({
-        type: "timeline",
-        provider: this.provider,
-        turnId,
-        item: {
-          type: "tool_call",
-          callId: `agy-${event.stepIndex ?? 0}`,
-          name: event.toolName ?? "subagent",
-          status: "completed",
-          error: null,
-          detail: { type: "sub_agent", log },
-        },
-      });
+      this.emitSubagentStep(turnId, event);
       return;
     }
     const toolInfo = event.toolInfo;
@@ -663,6 +644,33 @@ export class AntigravityAgentSession implements AgentSession {
         status: "completed",
         error: null,
         detail,
+      },
+    });
+  }
+
+  private emitSubagentStep(
+    turnId: string,
+    event: Extract<ReturnType<typeof parseAgyEvent>, { kind: "step_update" }>,
+  ): void {
+    const subagents = event.subagentInfo?.subagents ?? [];
+    const log = subagents
+      .map((subagent) => {
+        const name = subagent.role ?? subagent.type_name ?? "subagent";
+        const id = subagent.conversation_id ?? subagent.log_uri ?? "";
+        return id ? `${name}: ${id}` : name;
+      })
+      .join("\n");
+    this.emit({
+      type: "timeline",
+      provider: this.provider,
+      turnId,
+      item: {
+        type: "tool_call",
+        callId: `agy-${event.stepIndex ?? 0}`,
+        name: event.toolName ?? "subagent",
+        status: "completed",
+        error: null,
+        detail: { type: "sub_agent", log },
       },
     });
   }
@@ -801,6 +809,15 @@ export class AntigravityAgentSession implements AgentSession {
     if (this.activeTurn) {
       throw new Error("Stop the running Antigravity turn before changing model, effort, or mode");
     }
+    const previous = this.process;
+    const spawned = await this.spawn({
+      cwd: this.cwd,
+      model: overrides.model !== undefined ? overrides.model : this.model,
+      effort: overrides.effort !== undefined ? overrides.effort : this.effort,
+      modeId: overrides.modeId !== undefined ? resolveModeId(overrides.modeId) : this.modeId,
+      conversationId: this.conversationId,
+      printTimeout: AGY_PRINT_TIMEOUT,
+    });
     if (overrides.model !== undefined) {
       this.model = overrides.model;
     }
@@ -810,27 +827,14 @@ export class AntigravityAgentSession implements AgentSession {
     if (overrides.modeId !== undefined) {
       this.modeId = overrides.modeId;
     }
-    this.process.closeStdin();
-    if (!(await this.waitForExit(CLOSE_TIMEOUT_MS))) {
-      this.process.kill();
-      await this.process.waitForExit();
-    }
-    const spawned = await this.spawn({
-      cwd: this.cwd,
-      model: this.model,
-      effort: this.effort,
-      modeId: this.modeId,
-      conversationId: this.conversationId,
-      printTimeout: AGY_PRINT_TIMEOUT,
-    });
     this.process = spawned.process;
     this.conversationId = spawned.conversationId;
-    this.process.onLine((value) => {
-      this.handleEvent(parseAgyEvent(value));
-    });
-    this.process.onExit((exit) => {
-      this.handleExit(exit);
-    });
+    this.attachTo(spawned.process);
+    previous.closeStdin();
+    if (!(await this.waitForExit(previous, CLOSE_TIMEOUT_MS))) {
+      previous.kill();
+      await previous.waitForExit();
+    }
   }
 
   private emit(event: AgentStreamEvent): void {
@@ -965,7 +969,11 @@ export class AntigravityAgentClient implements AgentClient {
         provider: this.provider,
         id: entry.id,
         label: entry.label,
-        thinkingOptions: AGY_EFFORT_OPTIONS.map((option) => ({ ...option })),
+        thinkingOptions: AGY_EFFORT_OPTIONS.map((option) => ({
+          id: option.id,
+          label: option.label,
+          description: option.description,
+        })),
       }));
     });
     return { models, modes: [...ANTIGRAVITY_MODES], defaultModeId: ANTIGRAVITY_DEFAULT_MODE_ID };

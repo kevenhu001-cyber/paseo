@@ -781,6 +781,7 @@ describe("ProviderSnapshotManager public surface", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
       providerOverrides: {
+        antigravity: { enabled: false },
         claude: { enabled: false },
         codex: { enabled: false },
         copilot: { enabled: false },
@@ -791,7 +792,15 @@ describe("ProviderSnapshotManager public surface", () => {
     try {
       const entries = await manager.listProviders({ cwd: "/tmp/project", wait: true });
       const providers = entries.map((entry) => entry.provider).sort();
-      expect(providers).toEqual(["claude", "codex", "copilot", "omp", "opencode", "pi"]);
+      expect(providers).toEqual([
+        "antigravity",
+        "claude",
+        "codex",
+        "copilot",
+        "omp",
+        "opencode",
+        "pi",
+      ]);
       for (const entry of entries) {
         expect(entry.enabled).toBe(false);
         expect(entry.status).toBe("unavailable");
@@ -3135,7 +3144,7 @@ test("result identity covers content, metadata and status while unchanged refres
 });
 
 const PUBLICATION_PROVIDERS = Object.fromEntries(
-  ["claude", "codex", "copilot", "opencode", "pi", "omp"].map((provider) => [
+  ["antigravity", "claude", "codex", "copilot", "opencode", "pi", "omp"].map((provider) => [
     provider,
     { enabled: provider === "codex" },
   ]),
