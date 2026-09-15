@@ -743,7 +743,7 @@ Use `disallowedTools` to disable unsupported tools:
 
 ### Valid `extends` values
 
-Built-in providers: `claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`
+Built-in providers: `claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`, `antigravity`
 
 Special value: `acp` — creates a generic ACP provider (requires `command`)
 

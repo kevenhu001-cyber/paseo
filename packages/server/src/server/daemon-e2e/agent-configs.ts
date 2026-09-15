@@ -66,6 +66,13 @@ export const agentConfigs = {
       ask: "ask", // launches omp with always-ask approval mode
     },
   },
+  antigravity: {
+    provider: "antigravity",
+    modes: {
+      full: "full-access", // passes --dangerously-skip-permissions
+      ask: "default", // follows the agy permission policy
+    },
+  },
 } as const satisfies Record<string, AgentTestConfig>;
 
 export type AgentProvider = keyof typeof agentConfigs;

@@ -14,6 +14,7 @@ For the concept and how Paseo manages providers, see [Providers](/docs/providers
 
 Work out of the box once the underlying CLI is installed and authenticated.
 
+- [Antigravity](https://antigravity.google/product/antigravity-cli). Google's agentic CLI with multi-file editing and conversation history.
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Anthropic's coding agent with MCP support, streaming, and deep reasoning.
 - [Codex](/docs/codex). OpenAI's workspace agent with sandbox controls and optional network access.
 - [OpenCode](https://opencode.ai/). Open-source coding assistant with multi-provider model support.
@@ -25,7 +26,6 @@ Pick any of these from the in-app provider catalog. Each entry is a one-click in
 
 - [Agoragentic](https://agoragentic.com), agent marketplace with 174+ AI capabilities.
 - [Amp](https://github.com/tao12345666333/amp-acp), frontier coding agent.
-- [Antigravity](https://github.com/sysCat64/agy-acp), Google's Antigravity CLI (agy) through an ACP bridge.
 - [Auggie CLI](https://www.augmentcode.com/), Augment Code's agent backed by their context engine.
 - [Autohand Code](https://www.autohand.ai/cli/), Autohand AI's coding agent.
 - [Cline](https://cline.bot/cli), autonomous coding agent.

@@ -1,4 +1,5 @@
 export const BUILTIN_PROVIDER_ICON_NAMES = [
+  "antigravity",
   "claude",
   "codex",
   "copilot",
@@ -12,7 +13,6 @@ export const BUILTIN_PROVIDER_ICON_NAMES = [
 export const ACP_PROVIDER_ICON_NAMES = [
   "agoragentic-acp",
   "amp-acp",
-  "antigravity",
   "auggie",
   "autohand",
   "cline",

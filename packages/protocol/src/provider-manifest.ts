@@ -167,6 +167,24 @@ export const OMP_MODES: AgentProviderModeDefinition[] = [
   },
 ];
 
+const ANTIGRAVITY_MODES: AgentProviderModeDefinition[] = [
+  {
+    id: "default",
+    label: "Default",
+    description: "Follows your agy permission policy; tools outside the policy are skipped",
+    icon: "Shield",
+    colorTier: "moderate",
+  },
+  {
+    id: "full-access",
+    label: "Full Access",
+    description: "Passes --dangerously-skip-permissions; tools run without prompts",
+    icon: "ShieldOff",
+    colorTier: "dangerous",
+    isUnattended: true,
+  },
+];
+
 const MOCK_LOAD_TEST_MODES: AgentProviderModeDefinition[] = [
   {
     id: "load-test",
@@ -254,6 +272,13 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     enabledByDefault: false,
     defaultModeId: "full",
     modes: OMP_MODES,
+  },
+  {
+    id: "antigravity",
+    label: "Antigravity",
+    description: "Google's Antigravity CLI agent with multi-file editing and conversation history",
+    defaultModeId: "default",
+    modes: ANTIGRAVITY_MODES,
   },
 ];
 

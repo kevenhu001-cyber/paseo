@@ -9,6 +9,7 @@ import { replaceProviderSnapshotIcons, resolveProviderIconName } from "./provide
 
 describe("resolveProviderIconName", () => {
   it("returns the built-in identifier for known provider ids", () => {
+    expect(resolveProviderIconName("antigravity")).toEqual({ kind: "builtin", id: "antigravity" });
     expect(resolveProviderIconName("kiro")).toEqual({ kind: "builtin", id: "kiro" });
     expect(resolveProviderIconName("claude")).toEqual({ kind: "builtin", id: "claude" });
     expect(resolveProviderIconName("omp")).toEqual({ kind: "builtin", id: "omp" });
@@ -17,7 +18,6 @@ describe("resolveProviderIconName", () => {
 
   it("returns the catalog identifier for ACP catalog provider ids that ship an icon", () => {
     expect(resolveProviderIconName("amp-acp")).toEqual({ kind: "catalog", id: "amp-acp" });
-    expect(resolveProviderIconName("antigravity")).toEqual({ kind: "catalog", id: "antigravity" });
     expect(resolveProviderIconName("gemini")).toEqual({ kind: "catalog", id: "gemini" });
     expect(resolveProviderIconName("gjc")).toEqual({ kind: "catalog", id: "gjc" });
     expect(resolveProviderIconName("traecli")).toEqual({ kind: "catalog", id: "traecli" });

@@ -278,7 +278,7 @@ older daemon.
 ### Agent provider Paseo tools
 
 `agents.providers` is keyed by the exact provider ID used to launch the agent. The built-in IDs are
-`claude`, `codex`, `copilot`, `opencode`, `pi`, and `omp`. Custom provider IDs are their literal
+`claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`, and `antigravity`. Custom provider IDs are their literal
 configuration keys, such as `my-claude` or `zai`, not the provider named by `extends`.
 
 Each entry may include a Paseo-tool policy:

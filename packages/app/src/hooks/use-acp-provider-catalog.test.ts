@@ -88,13 +88,6 @@ describe("ACP provider catalog", () => {
     expect(patch.providers?.gjc?.env).toEqual({ GJC_ACP_PERMISSION_MODE: "prompt" });
   });
 
-  it("registers Antigravity with its ACP bridge command", () => {
-    const patch = buildAcpProviderConfigPatch(findProvider("antigravity"));
-
-    expect(patch.providers?.antigravity?.command).toEqual(["agy-acp"]);
-    expect(patch.providers?.antigravity?.params).toEqual({ supportsMcpServers: false });
-  });
-
   it("preserves provider params in the daemon config patch", () => {
     const droidPatch = buildAcpProviderConfigPatch(findProvider("factory-droid"));
 
