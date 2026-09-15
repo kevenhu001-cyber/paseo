@@ -33,25 +33,25 @@ import type {
   ProviderRefreshContext,
   ToolCallDetail,
 } from "../../agent-sdk-types.js";
-import { renderPromptAttachmentAsText } from "../../../prompt-attachments.js";
-import { runProviderRefreshActivity } from "../../../provider-refresh-deadline.js";
+import { renderPromptAttachmentAsText } from "../../prompt-attachments.js";
+import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
 import {
   checkProviderLaunchAvailable,
   createProviderEnv,
   resolveProviderLaunch,
   type ProviderRuntimeSettings,
   type ResolvedProviderLaunch,
-} from "../../../provider-launch-config.js";
-import { composeSystemPromptParts } from "../../../system-prompt.js";
+} from "../../provider-launch-config.js";
+import { composeSystemPromptParts } from "../../system-prompt.js";
 import {
   buildBinaryDiagnosticRows,
   buildCommandResolutionDiagnosticRows,
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   toDiagnosticErrorMessage,
-} from "../../diagnostic-utils.js";
-import { materializeProviderImage } from "../../provider-image-output.js";
-import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "../../provider-runner.js";
+} from "../diagnostic-utils.js";
+import { materializeProviderImage } from "../provider-image-output.js";
+import { appendOrReplaceGrowingAssistantMessage, runProviderTurn } from "../provider-runner.js";
 import {
   AGY_EFFORT_OPTIONS,
   isAgyTurnCanceled,
