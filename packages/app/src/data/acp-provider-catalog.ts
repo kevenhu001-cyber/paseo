@@ -33,6 +33,17 @@ const CATALOG_DATA = [
     command: ["amp-acp"],
   },
   {
+    id: "antigravity",
+    title: "Antigravity",
+    description:
+      "Google's Antigravity CLI (agy) through an ACP bridge with session replay. Requires the agy and agy-acp binaries installed and authenticated.",
+    version: "manual",
+    iconId: "antigravity",
+    installLink: "https://github.com/sysCat64/agy-acp",
+    command: ["agy-acp"],
+    params: { supportsMcpServers: false },
+  },
+  {
     id: "auggie",
     title: "Auggie CLI",
     description:

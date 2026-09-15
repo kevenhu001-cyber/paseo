@@ -25,6 +25,7 @@ Pick any of these from the in-app provider catalog. Each entry is a one-click in
 
 - [Agoragentic](https://agoragentic.com), agent marketplace with 174+ AI capabilities.
 - [Amp](https://github.com/tao12345666333/amp-acp), frontier coding agent.
+- [Antigravity](https://github.com/sysCat64/agy-acp), Google's Antigravity CLI (agy) through an ACP bridge.
 - [Auggie CLI](https://www.augmentcode.com/), Augment Code's agent backed by their context engine.
 - [Autohand Code](https://www.autohand.ai/cli/), Autohand AI's coding agent.
 - [Cline](https://cline.bot/cli), autonomous coding agent.
