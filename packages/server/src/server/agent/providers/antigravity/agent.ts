@@ -194,16 +194,6 @@ function coerceStringRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function firstString(record: Record<string, unknown>, keys: string[]): string | null {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.length > 0) {
-      return value;
-    }
-  }
-  return null;
-}
-
 function formatToolParameters(parameters: Record<string, unknown> | undefined): string {
   if (!parameters) {
     return "";
@@ -216,9 +206,146 @@ function formatToolParameters(parameters: Record<string, unknown> | undefined): 
 }
 
 /**
- * Map one agy `tool` step onto a normalized tool-call detail. `run_command`
- * has a stable documented shape; every other tool keeps its raw parameters
- * and output behind the generic `unknown` detail until its shape is observed.
+ * agy parameters arrive in mixed casing (`CommandLine`, `AbsolutePath`,
+ * `DirectoryPath`, `Query`, `SearchPath`, `TargetFile`, but also lowercase
+ * `query`). Normalize keys once so every lookup below is case-insensitive.
+ */
+function normalizeAgyParams(parameters?: Record<string, unknown>): Record<string, unknown> {
+  if (!parameters) {
+    return {};
+  }
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parameters)) {
+    const lower = key.toLowerCase();
+    if (!(lower in normalized)) {
+      normalized[lower] = value;
+    }
+  }
+  return normalized;
+}
+
+function firstNormalizedString(params: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = params[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+const AGY_FILE_KEYS = [
+  "absolutepath",
+  "targetfile",
+  "path",
+  "filepath",
+  "file_path",
+  "file",
+  "filename",
+  "canonical_path",
+];
+
+const AGY_DIR_KEYS = [
+  "directorypath",
+  "searchdirectory",
+  "searchpath",
+  "directory",
+  "dir",
+  "folder",
+  "path",
+  "cwd",
+];
+
+const AGY_COMMAND_KEYS = ["commandline", "command", "cmd", "input", "code", "script", "content"];
+
+const AGY_QUERY_KEYS = ["query", "q", "pattern", "pattern_or_query", "keyword", "keywords", "text"];
+
+const AGY_URL_KEYS = ["url", "uri", "link", "href", "pageurl", "target"];
+
+const AGY_CONTENT_KEYS = ["content", "text", "data", "newcontent", "new_content", "body"];
+
+const AGY_OLD_TEXT_KEYS = [
+  "oldstring",
+  "old_string",
+  "oldstr",
+  "old_str",
+  "oldtext",
+  "old_text",
+  "oldcontent",
+  "old_content",
+];
+
+const AGY_NEW_TEXT_KEYS = [
+  "newstring",
+  "new_string",
+  "newstr",
+  "new_str",
+  "newtext",
+  "new_text",
+  "newcontent",
+  "new_content",
+  "content",
+];
+
+const AGY_DIFF_KEYS = ["diff", "patch", "unifieddiff", "unified_diff"];
+
+const AGY_SHELL_TOOLS = new Set([
+  "run_command",
+  "notebook_execution",
+  "send_command_input",
+  "command_status",
+]);
+
+const AGY_READ_TOOLS = new Set(["view_file", "read_resource"]);
+
+const AGY_WRITE_TOOLS = new Set(["write_to_file", "create_file"]);
+
+const AGY_EDIT_TOOLS = new Set([
+  "replace_file_content",
+  "multi_replace_file_content",
+  "sed_file",
+  "notebook_edit",
+]);
+
+const AGY_SUBAGENT_TOOLS = new Set([
+  "invoke_subagent",
+  "browser_subagent",
+  "manage_subagents",
+  "define_subagent",
+]);
+
+const AGY_BROWSER_READ_TOOLS = new Set([
+  "browser_get_dom",
+  "capture_browser_console_logs",
+  "capture_browser_screenshot",
+  "browser_list_network_requests",
+  "browser_get_network_request",
+]);
+
+function plainTextDetail(
+  toolName: string,
+  output: string | undefined,
+  icon: "sparkles" | "brain" | "eye" | "bot" | "search",
+  params: Record<string, unknown>,
+  paramKeys: string[],
+): ToolCallDetail {
+  const text = output ?? firstNormalizedString(params, paramKeys) ?? undefined;
+  return {
+    type: "plain_text",
+    label: toolName,
+    icon,
+    ...(text !== undefined ? { text } : {}),
+  };
+}
+
+/**
+ * Map one agy `tool` step onto a normalized tool-call detail. Each agy tool
+ * family maps onto the detail type whose frontend icon matches the action:
+ * shell commands onto `shell` (terminal), file reads onto `read` (eye),
+ * edits/writes onto `edit`/`write` (pencil), listings and searches onto
+ * `search` (magnifier), URL reads onto `fetch`, subagent spawns onto
+ * `sub_agent` (bot), and prompts/tasks onto `plain_text` with an explicit
+ * icon. Truly unknown tools keep their raw parameters behind `unknown`.
  */
 export function mapAgyToolDetail(input: {
   toolName?: string;
@@ -226,47 +353,272 @@ export function mapAgyToolDetail(input: {
   output?: string;
 }): ToolCallDetail {
   const toolName = input.toolName ?? "unknown";
-  if (toolName === "run_command") {
-    const parameters = input.parameters ?? {};
+  const name = toolName.toLowerCase();
+  const params = normalizeAgyParams(input.parameters);
+  const output = input.output;
+
+  return (
+    mapAgyShellDetail(name, input.parameters, params, output) ??
+    mapAgyFileDetail(name, params, output) ??
+    mapAgySearchDetail(name, toolName, params, output) ??
+    mapAgyFetchDetail(name, params, output) ??
+    mapAgySubagentDetail(name, params, output) ??
+    mapAgyPromptDetail(toolName, name, params, output) ??
+    mapAgyHeuristicFileDetail(toolName, params, output) ?? {
+      type: "unknown",
+      input: {
+        tool: toolName,
+        ...(input.parameters ? { parameters: input.parameters } : {}),
+      },
+      output: input.output ?? null,
+    }
+  );
+}
+
+function mapAgyShellDetail(
+  name: string,
+  rawParameters: Record<string, unknown> | undefined,
+  params: Record<string, unknown>,
+  output: string | undefined,
+): ToolCallDetail | undefined {
+  if (!AGY_SHELL_TOOLS.has(name)) {
+    return undefined;
+  }
+  const command =
+    firstNormalizedString(params, AGY_COMMAND_KEYS) ??
+    (rawParameters ? formatToolParameters(rawParameters) : "");
+  return {
+    type: "shell",
+    command,
+    ...(output !== undefined ? { output } : {}),
+  };
+}
+
+function mapAgyFileDetail(
+  name: string,
+  params: Record<string, unknown>,
+  output: string | undefined,
+): ToolCallDetail | undefined {
+  if (AGY_READ_TOOLS.has(name)) {
+    const filePath = firstNormalizedString(params, AGY_FILE_KEYS);
+    if (filePath) {
+      return {
+        type: "read",
+        filePath,
+        ...(output !== undefined ? { content: output } : {}),
+      };
+    }
+    return undefined;
+  }
+  if (AGY_WRITE_TOOLS.has(name) || (name === "generate_image" && "targetfile" in params)) {
+    const filePath = firstNormalizedString(params, AGY_FILE_KEYS);
+    if (filePath) {
+      const content = firstNormalizedString(params, AGY_CONTENT_KEYS) ?? output;
+      return {
+        type: "write",
+        filePath,
+        ...(content !== undefined ? { content } : {}),
+      };
+    }
+    return undefined;
+  }
+  if (AGY_EDIT_TOOLS.has(name)) {
+    const filePath = firstNormalizedString(params, AGY_FILE_KEYS);
+    if (filePath) {
+      const newString = firstNormalizedString(params, AGY_NEW_TEXT_KEYS);
+      const unifiedDiff = firstNormalizedString(params, AGY_DIFF_KEYS) ?? undefined;
+      const oldString = firstNormalizedString(params, AGY_OLD_TEXT_KEYS);
+      return {
+        type: "edit",
+        filePath,
+        ...(oldString ? { oldString } : {}),
+        ...(newString ? { newString } : {}),
+        ...((unifiedDiff ?? output) ? { unifiedDiff: unifiedDiff ?? output } : {}),
+      };
+    }
+  }
+  return undefined;
+}
+
+const AGY_LIST_TOOLS = new Set([
+  "list_dir",
+  "list_resources",
+  "list_browser_pages",
+  "list_permissions",
+]);
+
+function mapAgySearchDetail(
+  name: string,
+  toolName: string,
+  params: Record<string, unknown>,
+  output: string | undefined,
+): ToolCallDetail | undefined {
+  if (AGY_LIST_TOOLS.has(name)) {
     return {
-      type: "shell",
-      command:
-        firstString(parameters, ["CommandLine", "command"]) ?? formatToolParameters(parameters),
-      ...(input.output !== undefined ? { output: input.output } : {}),
+      type: "search",
+      query: firstNormalizedString(params, AGY_DIR_KEYS) ?? toolName,
+      toolName: "search",
+      ...(output !== undefined ? { content: output } : {}),
     };
   }
-  const filePath = input.parameters
-    ? firstString(input.parameters, ["path", "filePath", "file", "filename"])
-    : null;
-  if (filePath && /read/i.test(toolName)) {
+  if (name === "find_by_name") {
+    const query = firstNormalizedString(params, [...AGY_QUERY_KEYS, "name", "filename"]);
+    if (query) {
+      return {
+        type: "search",
+        query,
+        toolName: "glob",
+        ...(output !== undefined ? { content: output } : {}),
+      };
+    }
+    return undefined;
+  }
+  if (name === "grep_search" || name === "search_web") {
+    const query = firstNormalizedString(params, AGY_QUERY_KEYS);
+    if (!query) {
+      return undefined;
+    }
+    return {
+      type: "search",
+      query,
+      toolName: name === "grep_search" ? "grep" : "web_search",
+      ...(output !== undefined ? { content: output } : {}),
+    };
+  }
+  return undefined;
+}
+
+const AGY_FETCH_TOOLS = new Set(["read_url_content", "open_browser_url", "read_browser_page"]);
+
+function mapAgyFetchDetail(
+  name: string,
+  params: Record<string, unknown>,
+  output: string | undefined,
+): ToolCallDetail | undefined {
+  if (!AGY_FETCH_TOOLS.has(name)) {
+    return undefined;
+  }
+  const url = firstNormalizedString(params, AGY_URL_KEYS);
+  if (!url) {
+    return undefined;
+  }
+  return {
+    type: "fetch",
+    url,
+    ...(output !== undefined ? { result: output } : {}),
+  };
+}
+
+function mapAgySubagentDetail(
+  name: string,
+  params: Record<string, unknown>,
+  output: string | undefined,
+): ToolCallDetail | undefined {
+  if (!AGY_SUBAGENT_TOOLS.has(name)) {
+    return undefined;
+  }
+  return {
+    type: "sub_agent",
+    subAgentType:
+      firstNormalizedString(params, ["agent", "type", "type_name", "role"]) ?? undefined,
+    description:
+      firstNormalizedString(params, ["task", "description", "prompt", "message"]) ?? undefined,
+    log: output ?? "",
+  };
+}
+
+const AGY_SPARKLES_PROMPT_TOOLS = new Set([
+  "ask_question",
+  "ask_permission",
+  "ask_custom_permission",
+  "finish",
+  "send_message",
+]);
+
+const AGY_BRAIN_PROMPT_TOOLS = new Set([
+  "manage_task",
+  "schedule",
+  "wait",
+  "wait_5_seconds",
+  "manage_inbox",
+]);
+
+const AGY_BROWSER_ACTION_TOOLS = new Set([
+  "browser_click_element",
+  "browser_drag_pixel_to_pixel",
+  "browser_input",
+  "browser_mouse_down",
+  "browser_mouse_up",
+  "browser_move_mouse",
+  "browser_press_key",
+  "browser_refresh_page",
+  "browser_resize_window",
+  "browser_scroll",
+  "browser_scroll_dom",
+  "browser_select_option",
+  "click_browser_pixel",
+  "execute_browser_javascript",
+  "generate_image",
+  "call_mcp_tool",
+]);
+
+function mapAgyPromptDetail(
+  toolName: string,
+  name: string,
+  params: Record<string, unknown>,
+  output: string | undefined,
+): ToolCallDetail | undefined {
+  if (AGY_SPARKLES_PROMPT_TOOLS.has(name)) {
+    return plainTextDetail(toolName, output, "sparkles", params, ["question", "prompt", "message"]);
+  }
+  if (AGY_BRAIN_PROMPT_TOOLS.has(name)) {
+    return plainTextDetail(toolName, output, "brain", params, ["task", "message", "description"]);
+  }
+  if (AGY_BROWSER_READ_TOOLS.has(name)) {
+    return plainTextDetail(toolName, output, "eye", params, AGY_URL_KEYS);
+  }
+  if (name.startsWith("browser_") || AGY_BROWSER_ACTION_TOOLS.has(name)) {
+    return plainTextDetail(toolName, output, "sparkles", params, [
+      ...AGY_URL_KEYS,
+      "selector",
+      "text",
+      "tool",
+    ]);
+  }
+  return undefined;
+}
+
+function mapAgyHeuristicFileDetail(
+  toolName: string,
+  params: Record<string, unknown>,
+  output: string | undefined,
+): ToolCallDetail | undefined {
+  const filePath = firstNormalizedString(params, AGY_FILE_KEYS);
+  if (!filePath) {
+    return undefined;
+  }
+  if (/read|view/i.test(toolName)) {
     return {
       type: "read",
       filePath,
-      ...(input.output !== undefined ? { content: input.output } : {}),
+      ...(output !== undefined ? { content: output } : {}),
     };
   }
-  if (filePath && /edit/i.test(toolName)) {
+  if (/edit|replace|sed/i.test(toolName)) {
     return {
       type: "edit",
       filePath,
-      ...(input.output !== undefined ? { unifiedDiff: input.output } : {}),
+      ...(output !== undefined ? { unifiedDiff: output } : {}),
     };
   }
-  if (filePath && /write/i.test(toolName)) {
+  if (/write|create/i.test(toolName)) {
     return {
       type: "write",
       filePath,
-      ...(input.output !== undefined ? { content: input.output } : {}),
+      ...(output !== undefined ? { content: output } : {}),
     };
   }
-  return {
-    type: "unknown",
-    input: {
-      tool: toolName,
-      ...(input.parameters ? { parameters: input.parameters } : {}),
-    },
-    output: input.output ?? null,
-  };
+  return undefined;
 }
 
 interface StartTurnResult {

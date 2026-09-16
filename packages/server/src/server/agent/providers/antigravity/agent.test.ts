@@ -155,6 +155,106 @@ describe("antigravity stream protocol", () => {
     });
   });
 
+  it("maps file tools onto read/write/edit details", () => {
+    expect(
+      mapAgyToolDetail({
+        toolName: "view_file",
+        parameters: { AbsolutePath: "/tmp/probe.txt" },
+        output: "2 lines, 7 bytes",
+      }),
+    ).toEqual({ type: "read", filePath: "/tmp/probe.txt", content: "2 lines, 7 bytes" });
+    expect(
+      mapAgyToolDetail({
+        toolName: "write_to_file",
+        parameters: { TargetFile: "/tmp/probe.txt" },
+      }),
+    ).toEqual({ type: "write", filePath: "/tmp/probe.txt" });
+    expect(
+      mapAgyToolDetail({
+        toolName: "replace_file_content",
+        parameters: { TargetFile: "/tmp/probe.txt" },
+        output: "edited",
+      }),
+    ).toMatchObject({ type: "edit", filePath: "/tmp/probe.txt" });
+    expect(
+      mapAgyToolDetail({
+        toolName: "multi_replace_file_content",
+        parameters: { TargetFile: "/tmp/probe.txt" },
+      }),
+    ).toMatchObject({ type: "edit", filePath: "/tmp/probe.txt" });
+  });
+
+  it("maps listing and search tools onto search details", () => {
+    expect(
+      mapAgyToolDetail({
+        toolName: "list_dir",
+        parameters: { DirectoryPath: "/home/ubuntu" },
+        output: "a\n",
+      }),
+    ).toEqual({ type: "search", query: "/home/ubuntu", toolName: "search", content: "a\n" });
+    expect(
+      mapAgyToolDetail({
+        toolName: "find_by_name",
+        parameters: { Pattern: "probe.txt", SearchDirectory: "/tmp" },
+        output: "probe.txt",
+      }),
+    ).toEqual({ type: "search", query: "probe.txt", toolName: "glob", content: "probe.txt" });
+    expect(
+      mapAgyToolDetail({
+        toolName: "grep_search",
+        parameters: { Query: "paseo", SearchPath: "/home/ubuntu" },
+        output: "hit",
+      }),
+    ).toEqual({ type: "search", query: "paseo", toolName: "grep", content: "hit" });
+    expect(mapAgyToolDetail({ toolName: "search_web", parameters: { query: "agy CLI" } })).toEqual({
+      type: "search",
+      query: "agy CLI",
+      toolName: "web_search",
+    });
+  });
+
+  it("maps url, subagent, and prompt tools onto fetch/sub_agent/plain_text details", () => {
+    expect(
+      mapAgyToolDetail({
+        toolName: "read_url_content",
+        parameters: { Url: "https://example.com" },
+        output: "body",
+      }),
+    ).toEqual({ type: "fetch", url: "https://example.com", result: "body" });
+    expect(
+      mapAgyToolDetail({
+        toolName: "invoke_subagent",
+        parameters: { agent: "researcher", task: "dig" },
+        output: "done",
+      }),
+    ).toEqual({
+      type: "sub_agent",
+      subAgentType: "researcher",
+      description: "dig",
+      log: "done",
+    });
+    expect(mapAgyToolDetail({ toolName: "ask_question", parameters: { question: "go?" } })).toEqual(
+      { type: "plain_text", label: "ask_question", icon: "sparkles", text: "go?" },
+    );
+    expect(mapAgyToolDetail({ toolName: "schedule", output: "later" })).toEqual({
+      type: "plain_text",
+      label: "schedule",
+      icon: "brain",
+      text: "later",
+    });
+    expect(
+      mapAgyToolDetail({
+        toolName: "capture_browser_screenshot",
+        parameters: { Url: "https://example.com" },
+      }),
+    ).toEqual({
+      type: "plain_text",
+      label: "capture_browser_screenshot",
+      icon: "eye",
+      text: "https://example.com",
+    });
+  });
+
   it("resolves the default and overridden launch commands", () => {
     expect(resolveAntigravityCommand(undefined)).toEqual(["agy"]);
     expect(
