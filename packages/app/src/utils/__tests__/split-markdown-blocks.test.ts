@@ -50,6 +50,26 @@ describe("splitMarkdownBlocks", () => {
     ]);
   });
 
+  it("keeps a streaming fence that ends mid-text with a trailing blank as one block", () => {
+    expect(splitMarkdownBlocks("```ts\nconst a = 1;\n\n")).toEqual(["```ts\nconst a = 1;\n\n"]);
+  });
+
+  it("keeps a fence indented up to three spaces as a fence", () => {
+    expect(splitMarkdownBlocks("Before\n\n  ```ts\n  code\n\n  more\n  ```\n\nAfter")).toEqual([
+      "Before",
+      "  ```ts\n  code\n\n  more\n  ```",
+      "After",
+    ]);
+  });
+
+  it("does not treat a fence-looking line inside a blockquote as a top-level fence", () => {
+    expect(splitMarkdownBlocks("> ```ts\n> code\n\nAfter")).toEqual(["> ```ts\n> code", "After"]);
+  });
+
+  it("keeps content after a closing fence without a blank separator in the same block", () => {
+    expect(splitMarkdownBlocks("```\na\n\nb\n```\ntail")).toEqual(["```\na\n\nb\n```\ntail"]);
+  });
+
   it("returns an empty array for empty input", () => {
     expect(splitMarkdownBlocks("")).toEqual([]);
   });

@@ -35,6 +35,7 @@ export function MarkdownFenceBlock({
     <HighlightedCodeBlock
       code={code}
       language={language}
+      phase={phase}
       inheritedStyles={inheritedStyles}
       textStyle={textStyle}
     />

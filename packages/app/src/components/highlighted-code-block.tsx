@@ -6,11 +6,13 @@ import * as Clipboard from "expo-clipboard";
 import { Check, Copy } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import type { HighlightToken } from "@getpaseo/highlight";
+import type { MarkdownPhase } from "@/components/markdown/fence/types";
 import { isNative, isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { syntaxTokenStyleFor } from "@/styles/syntax-token-styles";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
-import { highlightToKeyedLines, type KeyedLine } from "@/utils/highlight-cache";
+import { type KeyedLine } from "@/utils/highlight-cache";
+import { useStreamingKeyedLines } from "@/utils/streaming-keyed-lines";
 import {
   markdownCopyCodeBlockDataSet,
   markdownCopyDataSet,
@@ -22,32 +24,7 @@ interface HighlightedCodeBlockProps {
   language: string | null | undefined;
   inheritedStyles: TextStyle;
   textStyle: TextStyle;
-}
-
-// Fence info strings ("```ts", "```typescript", "```ts {1,3}") map to the
-// extension-based parser table in @getpaseo/highlight. Aliases here only
-// cover names that don't already match an extension key in parsers.ts.
-const LANGUAGE_ALIASES: Record<string, string> = {
-  typescript: "ts",
-  javascript: "js",
-  python: "py",
-  rust: "rs",
-  golang: "go",
-  "c++": "cpp",
-  csharp: "cs",
-  "c#": "cs",
-  objc: "m",
-  "objective-c": "m",
-  markdown: "md",
-  elixir: "ex",
-};
-
-function fenceLanguageToExtension(info: string | null | undefined): string | null {
-  if (!info) return null;
-  const first = info.trim().split(/\s+/)[0]?.toLowerCase();
-  if (!first) return null;
-  const normalized = first.replace(/^\./, "");
-  return LANGUAGE_ALIASES[normalized] ?? normalized;
+  phase?: MarkdownPhase;
 }
 
 function stripTerminalFenceNewline(code: string): string {
@@ -59,6 +36,7 @@ export const HighlightedCodeBlock = React.memo(function HighlightedCodeBlock({
   language,
   inheritedStyles,
   textStyle,
+  phase = "complete",
 }: HighlightedCodeBlockProps) {
   // Box styles (bg / padding / border / radius / margin) go on the wrapper View
   // so the absolute copy button positions relative to the visible code area,
@@ -73,10 +51,7 @@ export const HighlightedCodeBlock = React.memo(function HighlightedCodeBlock({
     [language],
   );
 
-  const keyedLines = useMemo<KeyedLine[] | null>(
-    () => highlightToKeyedLines(renderedCode, fenceLanguageToExtension(language)),
-    [renderedCode, language],
-  );
+  const keyedLines = useStreamingKeyedLines(renderedCode, language, phase === "streaming");
 
   const isCompact = useIsCompactFormFactor();
   const [isHovered, setIsHovered] = useState(false);
