@@ -71,6 +71,21 @@ jobs:
           echo "--- after ---"
           df -h / | tail -1
 
+      # Even with the Gradle daemon and Metro capped, hermesc and the per-ABI
+      # C++ compiles spike past the 16 GB host RAM right after the JS bundle
+      # lands and the runner agent is OOM-killed ("The operation was canceled"
+      # mid-assemble). Give the kernel a safety valve on the runner's second
+      # volume — the freed root only has ~14 GB left for the build itself.
+      - name: Enable swap
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
       - name: Resolve release tag
         if: ${{ env.IS_TAG_BUILD == 'true' }}
         shell: bash
@@ -187,6 +202,9 @@ jobs:
         env:
           # Cap Metro (holds the ~5900-module graph beside the build).
           NODE_OPTIONS: --max-old-space-size=2048
+          # Cap ninja's C++ compile fan-out inside each Gradle task —
+          # --max-workers=1 only serializes the tasks themselves.
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
           set -euo pipefail
           df -h / | tail -1
