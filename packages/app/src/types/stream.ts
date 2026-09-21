@@ -1013,16 +1013,23 @@ function appendThought(
 }
 
 function finalizeActiveThoughts(state: StreamItem[]): StreamItem[] {
-  let mutated = false;
-  const nextState = state.map((entry) => {
-    if (entry.kind === "thought" && entry.status !== "ready") {
-      mutated = true;
-      return markThoughtReady(entry);
+  // Scan without allocating first — in the common case no thought is pending
+  // and the input array is returned as-is. The previous version built a fresh
+  // array via .map on every event even when nothing changed.
+  let hasPendingThought = false;
+  for (let index = state.length - 1; index >= 0; index -= 1) {
+    const entry = state[index];
+    if (entry?.kind === "thought" && entry.status !== "ready") {
+      hasPendingThought = true;
+      break;
     }
-    return entry;
-  });
-
-  return mutated ? nextState : state;
+  }
+  if (!hasPendingThought) {
+    return state;
+  }
+  return state.map((entry) =>
+    entry.kind === "thought" && entry.status !== "ready" ? markThoughtReady(entry) : entry,
+  );
 }
 
 export function streamTimelineItemIdentity(item: StreamItem): string | null {
@@ -1047,7 +1054,15 @@ function agentToolCallIdentity(input: AgentToolCallIdentityInput): string {
 }
 
 function findExistingTimelineIdentityIndex(state: StreamItem[], identity: string): number {
-  return state.findIndex((entry) => streamTimelineItemIdentity(entry) === identity);
+  // Identities are unique within a lane, so the newest match is the only match.
+  // Scanning from the tail finds in-place tool-call updates — almost always
+  // recent — in O(distance) instead of a full forward sweep per event.
+  for (let index = state.length - 1; index >= 0; index -= 1) {
+    if (streamTimelineItemIdentity(state[index]!) === identity) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function hasNonEmptyObject(value: unknown): boolean {
@@ -1785,6 +1800,20 @@ function getTailAssistantToResume(params: {
   return params.tailAssistant;
 }
 
+// Tail id sets are rebuilt per tail array identity, so repeated lookups during
+// a commit — and across commits while the tail is unchanged — reuse one Set
+// instead of rescanning the history each time.
+const tailIdSetCache = new WeakMap<StreamItem[], Set<string>>();
+
+function getTailIdSet(tail: StreamItem[]): Set<string> {
+  let cached = tailIdSetCache.get(tail);
+  if (!cached) {
+    cached = new Set(tail.map((item) => item.id));
+    tailIdSetCache.set(tail, cached);
+  }
+  return cached;
+}
+
 /**
  * Flush head items to tail, avoiding duplicates.
  */
@@ -1794,7 +1823,23 @@ export function flushHeadToTail(tail: StreamItem[], head: StreamItem[]): StreamI
   }
 
   const finalized = finalizeHeadItems(head);
-  const tailIds = new Set(tail.map((item) => item.id));
+
+  // A head item whose timeline cursor is ahead of the tail's newest cursor
+  // provably isn't in the tail, so the O(tail) membership scan only runs when a
+  // head item lacks a cursor or falls inside the already-loaded window.
+  const lastTailCursor = tail[tail.length - 1]?.timelineCursor;
+  const needsDedupe = finalized.some((item) => {
+    const cursor = item.timelineCursor;
+    if (!cursor || !lastTailCursor) {
+      return true;
+    }
+    return cursor.epoch !== lastTailCursor.epoch || cursor.seq <= lastTailCursor.seq;
+  });
+  if (!needsDedupe) {
+    return [...tail, ...finalized];
+  }
+
+  const tailIds = getTailIdSet(tail);
   const newItems = finalized.filter((item) => !tailIds.has(item.id));
 
   if (newItems.length === 0) {
@@ -2028,7 +2073,7 @@ export function applyStreamEvent(params: {
   if (incomingKind !== null && isStreamableKind(incomingKind)) {
     const reservedItemIds =
       incomingKind === "assistant_message" && getActiveAssistantHeadIndex(nextHead) < 0
-        ? new Set(nextTail.map((item) => item.id))
+        ? getTailIdSet(nextTail)
         : undefined;
     const reduced = reduceStreamUpdate(nextHead, event, timestamp, {
       source,

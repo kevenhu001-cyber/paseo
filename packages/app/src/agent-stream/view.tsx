@@ -5,6 +5,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -308,6 +309,7 @@ const AGENT_CAPABILITY_FLAG_KEYS: (keyof AgentCapabilityFlags)[] = [
 ];
 
 const EMPTY_STREAM_HEAD: StreamItem[] = [];
+const EMPTY_ITEM_ID_SET: ReadonlySet<string> = new Set();
 
 function useRetainedValue<T>(value: T, active: boolean): T {
   const retainedRef = useRef(value);
@@ -346,6 +348,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     ref,
   ) {
     const { t } = useTranslation();
+    const streamViewKey = useId();
     const autoExpandReasoning = useSettings((settings) => settings.autoExpandReasoning);
     const toolCallDetailLevel = useSettings((settings) => settings.toolCallDetailLevel);
     const chatOutlineEnabled = useSettings((settings) => settings.chatOutlineEnabled);
@@ -562,6 +565,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       agentId,
       items: presentation.tail,
       loadRemoteOlder,
+      serverId: resolvedServerId,
+      viewKey: streamViewKey,
     });
     const isLoadingOlder = remoteIsLoadingOlder;
     const hasOlder = hasLocalHistory || remoteHasOlder;
@@ -605,11 +610,17 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const handleTimelineHistoryLoadError = useCallback(() => {
       toast?.error(t("agentStream.historyLoadFailed"));
     }, [t, toast]);
+    // Only consumed by web-only affordances (chat find targets, outline jumps);
+    // building a full-history Set per commit is wasted work on native.
     const visibleHistoryItemIds = useMemo(
       () =>
-        new Set(
-          [...baseRenderModel.history, ...baseRenderModel.segments.liveHead].map((item) => item.id),
-        ),
+        isWeb
+          ? new Set(
+              [...baseRenderModel.history, ...baseRenderModel.segments.liveHead].map(
+                (item) => item.id,
+              ),
+            )
+          : EMPTY_ITEM_ID_SET,
       [baseRenderModel.history, baseRenderModel.segments.liveHead],
     );
     const chatOutline = useChatOutline({
@@ -1087,8 +1098,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [expandedToolCallGroupIds, isMobile, presentation.historyGroupUpdatesByHostId],
     );
 
+    // ChatFind is a passthrough on native; concatenating the full history per
+    // commit only feeds the web search model.
     const findItems = useMemo(
-      () => [...effectiveStreamItems, ...(effectiveStreamHead ?? [])],
+      () => (isWeb ? [...effectiveStreamItems, ...(effectiveStreamHead ?? [])] : EMPTY_STREAM_HEAD),
       [effectiveStreamItems, effectiveStreamHead],
     );
     return (

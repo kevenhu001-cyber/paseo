@@ -85,6 +85,7 @@ async function prepareCachedTimeline(input: {
     newer: false,
     synchronized: false,
     acknowledgedClientMessageIds: replacement.acknowledgedClientMessageIds,
+    direction: "replace",
   });
   return stored;
 }
@@ -213,6 +214,7 @@ function commitProcessedTimeline(input: {
           : payload.hasNewer,
       synchronized,
       acknowledgedClientMessageIds: result.acknowledgedClientMessageIds,
+      direction: payload.direction,
     });
     return;
   }

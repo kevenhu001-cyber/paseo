@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { StreamItem } from "@/types/stream";
+import { releaseTimelineViewFloor, reportTimelineViewFloor } from "@/timeline/tail-retention";
 import { findMountedWindowStart, getMountedRecentStreamItems } from "./history-window";
 
 function findEarlierHistoryWindowStart(input: {
@@ -51,8 +52,12 @@ export function useStreamHistoryWindow(input: {
   agentId: string;
   items: StreamItem[];
   loadRemoteOlder: () => boolean | Promise<boolean>;
+  // When set, the mounted window registers the lowest timeline seq it covers so
+  // store-side tail eviction never removes rows this view is showing.
+  serverId?: string;
+  viewKey?: string;
 }) {
-  const { agentId, items, loadRemoteOlder } = input;
+  const { agentId, items, loadRemoteOlder, serverId, viewKey } = input;
   const initialStart = useMemo(
     () => findMountedWindowStart({ items, minMountedCount: getMountedRecentStreamItems() }),
     [items],
@@ -63,10 +68,15 @@ export function useStreamHistoryWindow(input: {
     boundaryItemId: initialBoundaryItemId,
     initialized: items.length > 0,
   }));
-  const boundaryIndex =
-    window.agentId === agentId && window.boundaryItemId !== null
-      ? items.findIndex((item) => item.id === window.boundaryItemId)
-      : -1;
+  // Memoized: a linear findIndex over the full history on every render (i.e.
+  // every stream commit) shows up once the loaded tail grows.
+  const boundaryIndex = useMemo(
+    () =>
+      window.agentId === agentId && window.boundaryItemId !== null
+        ? items.findIndex((item) => item.id === window.boundaryItemId)
+        : -1,
+    [items, window, agentId],
+  );
   let start = initialStart;
   if (window.agentId === agentId && window.initialized) {
     if (window.boundaryItemId === null) {
@@ -110,6 +120,21 @@ export function useStreamHistoryWindow(input: {
   const loadOlder = useCallback(async (): Promise<boolean> => {
     return revealLoadedHistory() || (await loadRemoteOlder());
   }, [loadRemoteOlder, revealLoadedHistory]);
+
+  // Eviction floor: the seq of the first cursor-bearing mounted row. Rows above
+  // it are hidden; mounted rows without a cursor are never evictable anyway.
+  const floorSeq = useMemo(() => {
+    for (let i = start; i < items.length; i += 1) {
+      const seq = items[i]?.timelineCursor?.seq;
+      if (seq !== undefined) return seq;
+    }
+    return null;
+  }, [items, start]);
+  useEffect(() => {
+    if (!serverId || !viewKey) return;
+    reportTimelineViewFloor({ serverId, agentId, viewKey, floorSeq });
+    return () => releaseTimelineViewFloor({ serverId, agentId, viewKey });
+  }, [serverId, agentId, viewKey, floorSeq]);
 
   return { start, hasLocalHistory: start > 0, revealLoadedHistory, loadOlder };
 }

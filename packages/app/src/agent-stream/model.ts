@@ -49,13 +49,10 @@ const EMPTY_AUXILIARY: StreamRenderAuxiliary = {
 
 const orderedTailCache = new WeakMap<StreamItem[], Map<string, StreamItem[]>>();
 const orderedHeadCache = new WeakMap<StreamItem[], Map<string, StreamItem[]>>();
+const renderedTailCache = new WeakMap<StreamItem[], Map<number, StreamItem[]>>();
 const splitHistoryCache = new WeakMap<
   StreamItem[],
   Map<string, Pick<AgentStreamRenderModel, "history" | "segments">>
->();
-const turnTimingCache = new WeakMap<
-  StreamItem[],
-  WeakMap<StreamItem[], Map<string, StreamTurnTiming>>
 >();
 
 function getOrderedItems(params: {
@@ -129,30 +126,27 @@ function splitOrderedTail(params: {
   return split;
 }
 
-function getTurnTiming(params: {
-  isTurnActive: boolean;
-  activeTurnStartedAt: Date | null;
-  tail: StreamItem[];
-  head: StreamItem[];
-}): StreamTurnTiming {
-  let cachedByHead = turnTimingCache.get(params.tail);
-  if (!cachedByHead) {
-    cachedByHead = new WeakMap();
-    turnTimingCache.set(params.tail, cachedByHead);
+// Once history exceeds the mounted window, historyStart > 0 and a naive
+// tail.slice() would hand every downstream identity-keyed cache (ordered tail,
+// split history, layoutStream) a fresh array on each commit — recomputing an
+// O(history) layout per stream tick. The sliced array is pure, so it is cached
+// per (tail, start) to keep downstream identities stable.
+function getRenderedTail(tail: StreamItem[], historyStart: number | undefined): StreamItem[] {
+  if (!historyStart) {
+    return tail;
   }
-  let cachedByActivity = cachedByHead.get(params.head);
-  if (!cachedByActivity) {
-    cachedByActivity = new Map();
-    cachedByHead.set(params.head, cachedByActivity);
+  let cachedByStart = renderedTailCache.get(tail);
+  if (!cachedByStart) {
+    cachedByStart = new Map();
+    renderedTailCache.set(tail, cachedByStart);
   }
-  const activityKey = `${params.isTurnActive}:${params.activeTurnStartedAt?.getTime() ?? "none"}`;
-  const cached = cachedByActivity.get(activityKey);
+  const cached = cachedByStart.get(historyStart);
   if (cached) {
     return cached;
   }
-  const timing = deriveStreamTurnTiming(params);
-  cachedByActivity.set(activityKey, timing);
-  return timing;
+  const rendered = tail.slice(historyStart);
+  cachedByStart.set(historyStart, rendered);
+  return rendered;
 }
 
 export function buildAgentStreamRenderModel(
@@ -163,7 +157,7 @@ export function buildAgentStreamRenderModel(
     isMobileBreakpoint: input.isMobileBreakpoint,
   });
   const orderingCacheKey = `${input.platform}:${input.isMobileBreakpoint}`;
-  const renderedTail = input.historyStart ? input.tail.slice(input.historyStart) : input.tail;
+  const renderedTail = getRenderedTail(input.tail, input.historyStart);
   const orderedTail = getOrderedItems({
     cache: orderedTailCache,
     source: renderedTail,
@@ -189,7 +183,7 @@ export function buildAgentStreamRenderModel(
     platform: input.platform,
     isMobileBreakpoint: input.isMobileBreakpoint,
   });
-  const turnTiming = getTurnTiming({
+  const turnTiming = deriveStreamTurnTiming({
     isTurnActive: input.isTurnActive,
     activeTurnStartedAt: input.activeTurnStartedAt,
     tail: renderedTail,

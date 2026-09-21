@@ -185,9 +185,48 @@ export class AgentStoreProjection {
     const store = useSessionStore.getState();
     const removeKey = withoutAgent(agentId);
     store.setAgentTimelineCursor(this.serverId, removeKey);
-    store.setAgentAuthoritativeHistoryApplied(this.serverId, agentId, false);
     store.setAgentStreamTail(this.serverId, removeKey);
     store.clearAgentStreamHead(this.serverId, agentId);
+    // Drop the remaining agent-keyed entries so long sessions don't accumulate
+    // state for agents that no longer exist.
+    useSessionStore.setState((state) => {
+      const session = state.sessions[this.serverId];
+      if (!session) return state;
+      const agentTasks = removeKey(session.agentTasks);
+      const messageSubmissions = removeKey(session.messageSubmissions);
+      const agentTimelineHasOlder = removeKey(session.agentTimelineHasOlder);
+      const agentTimelineHasNewer = removeKey(session.agentTimelineHasNewer);
+      const agentTimelineOlderFetchInFlight = removeKey(session.agentTimelineOlderFetchInFlight);
+      const agentHistorySyncGeneration = removeKey(session.agentHistorySyncGeneration);
+      const agentAuthoritativeHistoryApplied = removeKey(session.agentAuthoritativeHistoryApplied);
+      if (
+        agentTasks === session.agentTasks &&
+        messageSubmissions === session.messageSubmissions &&
+        agentTimelineHasOlder === session.agentTimelineHasOlder &&
+        agentTimelineHasNewer === session.agentTimelineHasNewer &&
+        agentTimelineOlderFetchInFlight === session.agentTimelineOlderFetchInFlight &&
+        agentHistorySyncGeneration === session.agentHistorySyncGeneration &&
+        agentAuthoritativeHistoryApplied === session.agentAuthoritativeHistoryApplied
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [this.serverId]: {
+            ...session,
+            agentTasks,
+            messageSubmissions,
+            agentTimelineHasOlder,
+            agentTimelineHasNewer,
+            agentTimelineOlderFetchInFlight,
+            agentHistorySyncGeneration,
+            agentAuthoritativeHistoryApplied,
+          },
+        },
+      };
+    });
   }
 
   archive(agentId: string, archivedAt: string): Agent | null {

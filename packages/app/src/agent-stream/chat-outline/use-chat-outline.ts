@@ -62,17 +62,29 @@ export function useChatOutline({
   const readingSeqRef = useRef<number | null>(null);
   const nextJumpRequestIdRef = useRef(0);
   const nextIndexRequestIdRef = useRef(0);
-  const loadedItems = useMemo(() => [...tail, ...(head ?? NO_STREAM_ITEMS)], [head, tail]);
+  // The outline rail only renders on web, so on native this hook must not copy or
+  // scan the full history on every stream commit.
+  const outlineActive = isWeb && enabled;
+  const loadedItems = useMemo(
+    () => (outlineActive ? [...tail, ...(head ?? NO_STREAM_ITEMS)] : NO_STREAM_ITEMS),
+    [head, tail, outlineActive],
+  );
   const prompts = enabled ? (index?.prompts ?? NO_PROMPTS) : NO_PROMPTS;
 
   // The viewed timeline already owns live delivery and reconnect catch-up. Its complete
   // loaded items (including rows outside the mounted window) invalidate the prompt index.
-  const latestPromptSeq = loadedItems.reduce(
-    (latest, item) =>
-      item.kind === "user_message" && item.timelineCursor?.epoch === timelineEpoch
-        ? Math.max(latest, item.timelineCursor.seq)
-        : latest,
-    -1,
+  const latestPromptSeq = useMemo(
+    () =>
+      outlineActive
+        ? loadedItems.reduce(
+            (latest, item) =>
+              item.kind === "user_message" && item.timelineCursor?.epoch === timelineEpoch
+                ? Math.max(latest, item.timelineCursor.seq)
+                : latest,
+            -1,
+          )
+        : -1,
+    [loadedItems, outlineActive, timelineEpoch],
   );
 
   useEffect(() => setIndex(null), [agentId, enabled, serverId, timelineEpoch]);

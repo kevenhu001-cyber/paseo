@@ -57,8 +57,8 @@ export interface StreamSegmentRenderers {
 }
 
 export interface StreamHistoryRowRevision {
-  contentById: { has(id: string): boolean };
-  displayStateById: { has(id: string): boolean };
+  contentById: { has(id: string): boolean; readonly size?: number };
+  displayStateById: { has(id: string): boolean; readonly size?: number };
   globalDisplayState: boolean;
 }
 

@@ -143,6 +143,44 @@ describe("buildAgentStreamRenderModel", () => {
     expect(model.segments.liveHead).toBe(head);
   });
 
+  it("reuses ordered committed history inside a mounted window when only the live head changes", () => {
+    const tail = [
+      userMessage("u1", 1),
+      assistantMessage("a1", 2),
+      userMessage("u2", 3),
+      assistantMessage("a2", 4),
+      userMessage("u3", 5),
+      assistantMessage("a3", 6),
+    ];
+    const firstHead = [assistantMessage("live-a", 7)];
+    const secondHead = [assistantMessage("live-b", 8)];
+
+    const first = buildAgentStreamRenderModel({
+      isTurnActive: true,
+      activeTurnStartedAt: tail[4]?.timestamp ?? null,
+      tail,
+      head: firstHead,
+      platform: "native",
+      isMobileBreakpoint: false,
+      historyStart: 2,
+    });
+    const second = buildAgentStreamRenderModel({
+      isTurnActive: true,
+      activeTurnStartedAt: tail[4]?.timestamp ?? null,
+      tail,
+      head: secondHead,
+      platform: "native",
+      isMobileBreakpoint: false,
+      historyStart: 2,
+    });
+
+    // A fresh tail.slice() per build would change these identities and cascade
+    // into a full history relayout on every stream commit.
+    expect(second.history).toBe(first.history);
+    expect(second.segments.historyMounted).toBe(first.segments.historyMounted);
+    expect(second.turnTiming.byAssistantId).toBe(first.turnTiming.byAssistantId);
+  });
+
   it("reuses ordered committed history when only the live head changes", () => {
     const tail = [userMessage("u1", 1), assistantMessage("a1", 2)];
     const firstHead = [assistantMessage("live-a", 3)];

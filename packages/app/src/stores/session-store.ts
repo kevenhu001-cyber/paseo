@@ -59,6 +59,7 @@ import {
   type TurnLiveness,
   type TurnPresentation,
 } from "@/timeline/turn-liveness";
+import { getTimelineViewFloorSeq, trimLoadedTail } from "@/timeline/tail-retention";
 
 export interface AgentRuntimeInfo {
   provider: AgentProvider;
@@ -532,6 +533,9 @@ interface SessionStoreActions {
       newer: boolean;
       synchronized: boolean;
       acknowledgedClientMessageIds: string[];
+      // "before" pages grow the loaded tail downward and are exempt from
+      // eviction; every other merge direction may trim the loaded prefix.
+      direction?: "before" | "after" | "tail" | "replace";
     },
   ) => void;
 
@@ -980,14 +984,28 @@ export const useSessionStore = create<SessionStore>()(
 
           let nextTail = session.agentStreamTail;
           let nextHead = session.agentStreamHead;
+          let nextCursor = session.agentTimelineCursor;
+          let nextHasOlder = session.agentTimelineHasOlder;
           let changedTail = false;
           let changedHead = false;
 
           if (state.tail !== undefined) {
             const existingTail = session.agentStreamTail.get(agentId);
             if (existingTail !== state.tail) {
+              let tail = state.tail;
+              const trimmed = trimLoadedTail({
+                tail,
+                cursor: session.agentTimelineCursor.get(agentId),
+                hasOlder: session.agentTimelineHasOlder.get(agentId) === true,
+                protectedFloorSeq: getTimelineViewFloorSeq(serverId, agentId),
+              });
+              if (trimmed) {
+                tail = trimmed.tail;
+                nextCursor = new Map(session.agentTimelineCursor).set(agentId, trimmed.cursor);
+                nextHasOlder = new Map(session.agentTimelineHasOlder).set(agentId, true);
+              }
               nextTail = new Map(session.agentStreamTail);
-              nextTail.set(agentId, state.tail);
+              nextTail.set(agentId, tail);
               changedTail = true;
             }
           }
@@ -1039,6 +1057,8 @@ export const useSessionStore = create<SessionStore>()(
                 ...session,
                 agentStreamTail: nextTail,
                 agentStreamHead: nextHead,
+                agentTimelineCursor: nextCursor,
+                agentTimelineHasOlder: nextHasOlder,
                 agentTasks,
                 messageSubmissions,
               },
@@ -1384,8 +1404,6 @@ export const useSessionStore = create<SessionStore>()(
           const session = prev.sessions[serverId];
           if (!session) return prev;
 
-          const nextTail = new Map(session.agentStreamTail);
-          nextTail.set(agentId, state.items);
           const nextHead = new Map(session.agentStreamHead);
           if (state.head.length > 0) nextHead.set(agentId, state.head);
           else nextHead.delete(agentId);
@@ -1396,6 +1414,23 @@ export const useSessionStore = create<SessionStore>()(
           if (state.older !== "unchanged") {
             nextHasOlder.set(agentId, state.older === "available");
           }
+          // "before" pages grow the tail downward; trimming would undo the fetch.
+          let itemsToStore = state.items;
+          if (state.direction !== "before") {
+            const trimmed = trimLoadedTail({
+              tail: state.items,
+              cursor: nextCursor.get(agentId),
+              hasOlder: nextHasOlder.get(agentId) === true,
+              protectedFloorSeq: getTimelineViewFloorSeq(serverId, agentId),
+            });
+            if (trimmed) {
+              itemsToStore = trimmed.tail;
+              nextCursor.set(agentId, trimmed.cursor);
+              nextHasOlder.set(agentId, true);
+            }
+          }
+          const nextTail = new Map(session.agentStreamTail);
+          nextTail.set(agentId, itemsToStore);
           const nextHasNewer = new Map(session.agentTimelineHasNewer);
           nextHasNewer.set(agentId, state.newer);
           const nextAuthoritative = new Map(session.agentAuthoritativeHistoryApplied);
@@ -1418,7 +1453,7 @@ export const useSessionStore = create<SessionStore>()(
             nextAuthoritative.set(agentId, true);
             nextSyncGeneration.set(agentId, session.historySyncGeneration);
           }
-          const tasks = latestTasksFromStream([...state.items, ...state.head]);
+          const tasks = latestTasksFromStream([...itemsToStore, ...state.head]);
           const agentTasks = new Map(session.agentTasks);
           if (tasks.length > 0) agentTasks.set(agentId, tasks);
           else agentTasks.delete(agentId);

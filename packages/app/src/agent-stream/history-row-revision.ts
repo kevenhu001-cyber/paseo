@@ -36,12 +36,34 @@ export function useRevisedHistoryRows(
     () => items.map((item) => getHistoryRowDisplayVariant(item, globalDisplayState)),
     [items, globalDisplayState],
   );
-  const displayStateRevisedRows = useMemo(
-    () => globallyRevisedRows.map((item) => (displayStateById?.has(item.id) ? { ...item } : item)),
-    [globallyRevisedRows, displayStateById],
-  );
-  return useMemo(
-    () => displayStateRevisedRows.map((item) => (contentById?.has(item.id) ? { ...item } : item)),
-    [displayStateRevisedRows, contentById],
-  );
+  const displayStateRevisedRows = useMemo(() => {
+    if (displayStateById?.size === 0) {
+      return globallyRevisedRows;
+    }
+    let changed = false;
+    const next = globallyRevisedRows.map((item) => {
+      if (!displayStateById?.has(item.id)) {
+        return item;
+      }
+      changed = true;
+      return { ...item };
+    });
+    // Keep the input array identity when no row changed so the viewport's data
+    // prop stays stable.
+    return changed ? next : globallyRevisedRows;
+  }, [globallyRevisedRows, displayStateById]);
+  return useMemo(() => {
+    if (contentById?.size === 0) {
+      return displayStateRevisedRows;
+    }
+    let changed = false;
+    const next = displayStateRevisedRows.map((item) => {
+      if (!contentById?.has(item.id)) {
+        return item;
+      }
+      changed = true;
+      return { ...item };
+    });
+    return changed ? next : displayStateRevisedRows;
+  }, [displayStateRevisedRows, contentById]);
 }
