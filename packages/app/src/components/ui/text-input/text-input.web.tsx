@@ -2,12 +2,11 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef 
 import { TextInput } from "react-native";
 import type { EditingTextInputHandle, EditingTextInputProps } from "./types";
 
-interface WebTextInputElement extends TextInput {
-  value?: string;
-  setSelectionRange?: (start: number, end: number) => void;
-  addEventListener(type: "compositionstart" | "compositionend", listener: EventListener): void;
-  removeEventListener(type: "compositionstart" | "compositionend", listener: EventListener): void;
-}
+type WebTextInputElement = HTMLElement &
+  TextInput & {
+    value?: string;
+    setSelectionRange?: (start: number, end: number) => void;
+  };
 
 export const EditingTextInput = forwardRef<EditingTextInputHandle, EditingTextInputProps>(
   function EditingTextInputWeb(allProps, ref) {
@@ -43,11 +42,19 @@ export const EditingTextInput = forwardRef<EditingTextInputHandle, EditingTextIn
         onChangeTextRef.current?.(nextText);
       };
 
+      const handleFocus = () => {
+        if (typeof window !== "undefined" && (window.scrollY !== 0 || window.scrollX !== 0)) {
+          window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+        }
+      };
+
       input.addEventListener("compositionstart", startComposition);
       input.addEventListener("compositionend", endComposition);
+      input.addEventListener("focus", handleFocus, { passive: true });
       return () => {
         input.removeEventListener("compositionstart", startComposition);
         input.removeEventListener("compositionend", endComposition);
+        input.removeEventListener("focus", handleFocus);
       };
     }, []);
 
@@ -58,7 +65,18 @@ export const EditingTextInput = forwardRef<EditingTextInputHandle, EditingTextIn
     }, []);
 
     useImperativeHandle(ref, () => ({
-      focus: () => inputRef.current?.focus(),
+      focus: () => {
+        const input = inputRef.current as unknown as HTMLElement | null;
+        if (input && typeof input.focus === "function") {
+          try {
+            input.focus({ preventScroll: true });
+            return;
+          } catch {
+            // Fallback for environments where preventScroll option is unsupported
+          }
+        }
+        inputRef.current?.focus();
+      },
       blur: () => inputRef.current?.blur(),
       isFocused: () => document.activeElement === inputRef.current,
       getText: () => {

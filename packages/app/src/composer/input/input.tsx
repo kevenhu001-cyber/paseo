@@ -1959,7 +1959,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flexShrink: 1,
     width: "100%",
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.content,
+    fontSize: isWeb ? 16 : theme.fontSize.content,
     fontWeight: theme.fontWeight.normal,
     // No lineHeight on native. React Native applies it as a span over the text, and an
     // empty trailing line is laid out from the font's own metrics on some devices, so
@@ -1967,7 +1967,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     // line box is the same for every line. Web keeps the CSS value.
     ...(isWeb
       ? ({
-          lineHeight: theme.fontSize.content * 1.4,
+          lineHeight: 16 * 1.4,
           outlineStyle: "none",
           outlineWidth: 0,
           outlineColor: "transparent",

@@ -2,8 +2,9 @@ import { useEffect } from "react";
 import { isWeb } from "@/constants/platform";
 
 const COMPACT_WEB_VIEWPORT_CONTENT =
-  "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
-const DEFAULT_WEB_VIEWPORT_CONTENT = "width=device-width, initial-scale=1, viewport-fit=cover";
+  "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content";
+const DEFAULT_WEB_VIEWPORT_CONTENT =
+  "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content";
 
 export function useCompactWebViewportZoomLock(isCompactLayout: boolean) {
   useEffect(() => {

@@ -545,7 +545,18 @@ function focusMessageInputWithPlatformStrategy(messageInputRef: {
     return;
   }
   focusWithRetries({
-    focus: () => messageInputRef.current?.focus(),
+    focus: () => {
+      const el = messageInputRef.current?.getNativeElement?.();
+      if (el && typeof el.focus === "function") {
+        try {
+          el.focus({ preventScroll: true });
+          return;
+        } catch {
+          // fallback
+        }
+      }
+      messageInputRef.current?.focus();
+    },
     isFocused: () => {
       const el = messageInputRef.current?.getNativeElement?.() ?? null;
       const active = typeof document !== "undefined" ? document.activeElement : null;
