@@ -192,3 +192,26 @@ The app runs on iOS, Android, web (browser), and web (Electron desktop). Code is
 ## Debugging
 
 Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
+
+## Fork release flow (kevenhu001-cyber/paseo)
+
+This fork cuts its own releases off `main`. Push a `v*` tag and three
+workflows produce a published GitHub prerelease: Desktop Release
+(Windows exe/zip, macOS dmg/zip, Linux AppImage/deb/rpm/tar.gz plus
+updater manifests), Android APK Release (`expo prebuild` + `gradlew
+assembleRelease` on the runner — EAS is unusable on forks), and Docker
+(`ghcr.io/kevenhu001-cyber/paseo-server`, not `paseo` — that package is
+unlinked so the workflow token can't push to it). The APK signs with
+the `ANDROID_KEYSTORE_BASE64` family of secrets; macOS builds are
+unsigned because the fork has no Apple certificate secrets.
+
+To cut a release: `npm run version:all:beta:next`, then
+`NPM_CONFIG_USERCONFIG=/dev/null npm install --workspaces
+--include-workspace-root` (the user-level `allow-scripts` in `~/.npmrc`
+breaks `npm install` with EALLOWSCRIPTS inside the npm-version lifecycle),
+commit `chore(release): cut <version>`, `git tag -a v<version>`, push main
+and the tag. Do not run `release:beta:*`/`release:push` — they publish
+to npm, which the fork must not do.
+
+Nix darwin builds race the Nix Update Hash commit on version-bump pushes;
+the fix lands `[skip ci]` and self-heals on the next push.
