@@ -169,6 +169,13 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=${{ matrix.node_heap_mb }}
         run: |
           set -euo pipefail
+          if [[ -z "${CSC_LINK:-}" ]]; then
+            # Forks without Apple secrets: electron-builder resolves an empty
+            # CSC_LINK to the project directory and fails with "not a file".
+            echo "APPLE_CERTIFICATE is not configured; building without signing or notarization."
+            unset CSC_LINK
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
           build_args=(-- --publish never --mac --${{ matrix.electron_arch }})
           build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
           build_args+=("-c.publish.channel=$RELEASE_CHANNEL")

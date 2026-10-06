@@ -204,7 +204,7 @@ adb exec-out screencap -p > screenshot.png
 Stable tag pushes like `v0.1.0` trigger:
 
 - The EAS GitHub app on Expo servers (iOS + Android production builds + store submit). There is no workflow file in this repo for it.
-- `.github/workflows/android-apk-release.yml` on GitHub Actions (APK asset on GitHub Release).
+- `.github/workflows/android-apk-release.yml` on GitHub Actions (APK asset on GitHub Release). The workflow builds the APK on the runner itself — `expo prebuild` plus `gradlew assembleRelease` — not on EAS, so it works without an Expo account that can access the upstream project. When the `ANDROID_KEYSTORE_BASE64`/`ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_ALIAS`/`ANDROID_KEY_PASSWORD` secrets are configured it re-signs the APK with `apksigner`; without them the template's debug signature ships as-is.
 
 iOS auto-submits to App Store review via a Fastlane lane after EAS uploads to TestFlight. Android auto-submits to the Play Store via EAS-managed credentials.
 

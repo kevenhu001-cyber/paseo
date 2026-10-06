@@ -86,6 +86,9 @@ buildNpmPackage {
     # Expo's web build pulls in some pre-bundled assets; ensure it doesn't try
     # to phone home during the build.
     CI = "1";
+    # Metro's jest workers OOM on the generated ws-outbound.aot.js validator,
+    # the last module in the web bundle (same fix as desktop-release.yml).
+    NODE_OPTIONS = "--max-old-space-size=4096";
   };
 
   buildPhase = ''

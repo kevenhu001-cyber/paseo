@@ -92,52 +92,63 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Expo and EAS
-        uses: expo/expo-github-action@v8
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          distribution: temurin
+          java-version: "21"
 
-      - name: Build Android APK on EAS
-        id: eas_build
+      - name: Build workspace dependencies
+        run: npm run build:app-deps
+
+      - name: Prebuild Android project
+        working-directory: packages/app
+        env:
+          APP_VARIANT: production
+        run: npx expo prebuild --platform android --clean --non-interactive
+
+      - name: Build release APK locally
+        working-directory: packages/app/android
         shell: bash
         run: |
           set -euo pipefail
-          cd packages/app
+          ./gradlew :app:assembleRelease --no-daemon \
+            -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease \
+            -x generateReleaseLintModel -x generateReleaseLintVitalModel
 
-          build_json="$(npx eas build --platform android --profile production-apk --non-interactive --wait --json)"
-          echo "$build_json" > "$RUNNER_TEMP/eas-build.json"
-
-          build_id="$(jq -r 'if type == "array" then .[0].id // empty else .id // empty end' "$RUNNER_TEMP/eas-build.json")"
-          if [ -z "$build_id" ]; then
-            echo "Failed to determine EAS build ID."
-            cat "$RUNNER_TEMP/eas-build.json"
-            exit 1
-          fi
-
-          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve APK artifact URL
+      - name: Sign and stage APK
         id: artifact
         shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          cd packages/app
-
-          build_view_json="$(npx eas build:view '${{ steps.eas_build.outputs.build_id }}' --json)"
-          echo "$build_view_json" > "$RUNNER_TEMP/eas-build-view.json"
-
-          artifact_url="$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' "$RUNNER_TEMP/eas-build-view.json")"
-          if [ -z "$artifact_url" ]; then
-            echo "Failed to determine APK artifact URL."
-            cat "$RUNNER_TEMP/eas-build-view.json"
-            exit 1
-          fi
+          unsigned_apk="packages/app/android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$unsigned_apk"
 
           asset_name="paseo-${RELEASE_TAG}-android.apk"
           asset_path="$RUNNER_TEMP/$asset_name"
 
-          curl --fail --location --output "$asset_path" "$artifact_url"
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::Android keystore secrets not configured; publishing the APK as built (debug-signed)."
+            cp "$unsigned_apk" "$asset_path"
+          else
+            keystore="$RUNNER_TEMP/release.keystore"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+            build_tools="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)"
+            "$build_tools/apksigner" sign \
+              --ks "$keystore" \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+              --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+              --out "$asset_path" \
+              "$unsigned_apk"
+            rm -f "$keystore"
+            "$build_tools/apksigner" verify --print-certs "$asset_path"
+          fi
 
           echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
