@@ -59,7 +59,10 @@ jobs:
           set -euo pipefail
 
           owner="$(printf '%s' "${REPO_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          image="ghcr.io/${owner}/paseo"
+          # Fork: ghcr.io/${owner}/paseo already exists as an unlinked package,
+          # so GITHUB_TOKEN gets write_package denied on push. A fresh name lets
+          # Actions create the package auto-linked to this repo.
+          image="ghcr.io/${owner}/paseo-server"
           package_version="$(node -p "require('./package.json').version")"
           install_version="${INPUT_PASEO_VERSION:-${package_version}}"
           publish=false
